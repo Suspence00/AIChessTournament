@@ -72,6 +72,7 @@ function applyEloUpdate(
 export default function TournamentPage() {
   const groupedModels = getGroupedModels();
   const [mode, setMode] = useState<MatchMode>("strict");
+  const [clockMinutes, setClockMinutes] = useState(3);
   const [selected, setSelected] = useState<string[]>([]);
   const [matches, setMatches] = useState<MatchCardState[]>([]);
   const [tStatus, setTStatus] = useState("Pick players and start the arena.");
@@ -167,6 +168,7 @@ export default function TournamentPage() {
 
   const runMatch = async (cardId: string, white: string, black: string, mode: MatchMode) => {
     const controller = new AbortController();
+    const bulletMinutes = Math.min(3, Math.max(1, clockMinutes));
     setMatches((prev) =>
       prev.map((m) =>
         m.id === cardId
@@ -183,7 +185,12 @@ export default function TournamentPage() {
     try {
       const response = await fetch("/api/match", {
         method: "POST",
-        body: JSON.stringify({ whiteModel: white, blackModel: black, mode }),
+        body: JSON.stringify({
+          whiteModel: white,
+          blackModel: black,
+          mode,
+          clockMinutes: mode === "bullet" ? bulletMinutes : undefined
+        }),
         headers: { "Content-Type": "application/json" },
         signal: controller.signal
       });
@@ -396,13 +403,49 @@ export default function TournamentPage() {
               ))}
             </div>
 
-            <div className="flex items-center justify-between">
-              <button
-                onClick={() => setMode(mode === "strict" ? "chaos" : "strict")}
-                className="rounded-md border border-white/10 px-3 py-2 text-sm hover:border-arena-accent"
-              >
-                Mode: {mode === "strict" ? "Strict" : "Chaos"}
-              </button>
+            <div className="flex items-center justify-between flex-wrap gap-3">
+              <div className="flex flex-col gap-2">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-slate-300">Mode</span>
+                  <div className="flex gap-2">
+                    {(["strict", "chaos", "bullet"] as MatchMode[]).map((m) => (
+                      <button
+                        key={m}
+                        disabled={busy}
+                        onClick={() => setMode(m)}
+                        className={clsx(
+                          "rounded-md border px-3 py-2 text-sm transition disabled:opacity-40 disabled:cursor-not-allowed",
+                          mode === m
+                            ? "border-arena-accent bg-arena-accent/10 text-white"
+                            : "border-white/10 text-slate-300 hover:border-arena-accent/50"
+                        )}
+                      >
+                        {m === "strict" ? "Strict" : m === "chaos" ? "Chaos" : "Bullet"}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                {mode === "bullet" && (
+                  <div className="flex items-center gap-1 text-xs sm:text-sm">
+                    <span className="text-slate-400">Clock</span>
+                    {[1, 2, 3].map((min) => (
+                      <button
+                        key={min}
+                        disabled={busy}
+                        onClick={() => setClockMinutes(min)}
+                        className={clsx(
+                          "rounded-md border px-2 py-1 transition disabled:opacity-40 disabled:cursor-not-allowed",
+                          clockMinutes === min
+                            ? "border-arena-accent bg-arena-accent/20 text-white"
+                            : "border-white/10 text-slate-300 hover:border-arena-accent/50"
+                        )}
+                      >
+                        {min}m
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
               <div className="flex gap-2">
                 <button
                   onClick={stopAll}
@@ -421,7 +464,7 @@ export default function TournamentPage() {
               </div>
             </div>
 
-            <p className="text-xs text-slate-400">{tStatus}</p>
+            <p className="text-xs text-slate-400">{mode === "bullet" ? `${tStatus} · Bullet ${clockMinutes}m clocks` : tStatus}</p>
           </div>
 
           <div className="glass rounded-2xl p-5 space-y-4">

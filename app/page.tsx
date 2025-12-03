@@ -5,7 +5,7 @@ import clsx from "clsx";
 import dynamic from "next/dynamic";
 import { modelOptions } from "@/lib/models";
 import { useLocalStorage } from "@/lib/use-local-storage";
-import { MatchMode, MatchMoveEvent, MatchResult, MatchStreamEvent } from "@/lib/types";
+import { MatchClocks, MatchMode, MatchMoveEvent, MatchResult, MatchStreamEvent } from "@/lib/types";
 import { ModelPicker } from "@/components/model-picker";
 import { MoveLog } from "@/components/move-log";
 import { HistoryPanel } from "@/components/history-panel";
@@ -33,12 +33,28 @@ export default function Home() {
   const [illegalState, setIllegalState] = useState<{ white: number; black: number }>({ white: 0, black: 0 });
   const [evalScore, setEvalScore] = useState<number | null>(null);
   const [evalStatus, setEvalStatus] = useState<string>("Idle");
+  const [clockMinutes, setClockMinutes] = useState<number>(3);
+  const [clocks, setClocks] = useState<{ white: number; black: number }>({ white: 0, black: 0 });
+  const [displayClocks, setDisplayClocks] = useState<{ white: number; black: number }>({ white: 0, black: 0 });
+  const [turnStartTs, setTurnStartTs] = useState<number | null>(null);
+  const [activeTurn, setActiveTurn] = useState<"white" | "black" | null>(null);
   const boardExpanded = running || moves.length > 0;
   const boardContainerRef = useRef<HTMLDivElement | null>(null);
   const [boardWidthPx, setBoardWidthPx] = useState(480);
   const audioCtxRef = useRef<AudioContext | null>(null);
   const activeColorFromFen = () => (fen.split(" ")[1] === "w" ? "white" : "black");
-  const perMoveTokens = estimateTokens(moves, fen, activeColorFromFen(), mode);
+  const activeColor = activeColorFromFen();
+  const bulletInitialMs = Math.min(3, Math.max(1, clockMinutes)) * 60_000;
+  const formatClock = (ms: number) => {
+    const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+    return `${minutes}:${seconds.toString().padStart(2, "0")}`;
+  };
+  const perMoveTokens = estimateTokens(moves, fen, activeColor, mode, mode === "bullet" ? {
+    clockMsRemaining: clocks[activeColor],
+    initialClockMs: bulletInitialMs
+  } : undefined);
   const expectedPlies = Math.max(80, moves.length + 10); // rough full-game projection
   const estimatedTokens = {
     input: perMoveTokens.input * expectedPlies,
@@ -117,6 +133,27 @@ export default function Home() {
   }, [history, setHistory]);
 
   useEffect(() => {
+    if (mode !== "bullet") {
+      setDisplayClocks({ white: clocks.white, black: clocks.black });
+      return;
+    }
+    setDisplayClocks({ white: clocks.white, black: clocks.black });
+    if (!running || !activeTurn || turnStartTs === null) return;
+    const tick = () => {
+      setDisplayClocks(() => {
+        const next = { ...clocks };
+        if (activeTurn && turnStartTs !== null) {
+          next[activeTurn] = Math.max(0, clocks[activeTurn] - (Date.now() - turnStartTs));
+        }
+        return next;
+      });
+    };
+    tick();
+    const id = window.setInterval(tick, 200);
+    return () => window.clearInterval(id);
+  }, [mode, running, clocks, activeTurn, turnStartTs]);
+
+  useEffect(() => {
     const toLabel = (id: string) => modelOptions.find((m) => m.value === id)?.label ?? id;
     const stored = localStorage.getItem("elo-standings");
     if (stored) {
@@ -134,6 +171,16 @@ export default function Home() {
     setEloChart(baseline);
   }, []);
 
+  const syncClocksFromEvent = (incoming?: MatchClocks, nextTurn?: "white" | "black" | null) => {
+    if (mode !== "bullet" || !incoming) return;
+    setClocks({ white: incoming.whiteMs, black: incoming.blackMs });
+    setDisplayClocks({ white: incoming.whiteMs, black: incoming.blackMs });
+    if (nextTurn !== undefined) {
+      setActiveTurn(nextTurn);
+      setTurnStartTs(nextTurn ? Date.now() : null);
+    }
+  };
+
   const handleEvent = (event: MatchStreamEvent) => {
     if (event.type === "status") {
       if (event.illegalCounts) {
@@ -145,6 +192,7 @@ export default function Home() {
         });
       }
       setStatus(event.message);
+      syncClocksFromEvent(event.clocks, activeColorFromFen());
       return;
     }
 
@@ -152,6 +200,8 @@ export default function Home() {
       setFen(event.fen);
       setMoves((prev) => [...prev, event]);
       setIllegalState(event.illegalCounts);
+      const nextTurn = event.fen.split(" ")[1] === "w" ? "white" : "black";
+      syncClocksFromEvent(event.clocks, nextTurn);
       const isCapture = event.san?.includes("x");
       playSound(isCapture ? "capture" : "move");
       evaluatePosition(event.fen);
@@ -159,6 +209,9 @@ export default function Home() {
     }
 
     if (event.type === "end") {
+      syncClocksFromEvent(event.result.clocks, null);
+      setTurnStartTs(null);
+      setActiveTurn(null);
       setResult(event.result);
       setHistory((prev) => [...prev, event.result]);
       setRunning(false);
@@ -212,13 +265,24 @@ export default function Home() {
     setMoves([]);
     setResult(null);
     setFen("start");
+    if (mode === "bullet") {
+      setClocks({ white: bulletInitialMs, black: bulletInitialMs });
+      setDisplayClocks({ white: bulletInitialMs, black: bulletInitialMs });
+      setActiveTurn("white");
+      setTurnStartTs(Date.now());
+    } else {
+      setClocks({ white: 0, black: 0 });
+      setDisplayClocks({ white: 0, black: 0 });
+      setActiveTurn(null);
+      setTurnStartTs(null);
+    }
 
     const controller = new AbortController();
     abortRef.current = controller;
 
     const response = await fetch("/api/match", {
       method: "POST",
-      body: JSON.stringify({ whiteModel, blackModel, mode }),
+      body: JSON.stringify({ whiteModel, blackModel, mode, clockMinutes: mode === "bullet" ? clockMinutes : undefined }),
       headers: { "Content-Type": "application/json" },
       signal: controller.signal
     }).catch((err) => {
@@ -270,6 +334,8 @@ export default function Home() {
   const stopMatch = () => {
     abortRef.current?.abort();
     setRunning(false);
+    setTurnStartTs(null);
+    setActiveTurn(null);
     setStatus("Match stopped");
   };
 
@@ -291,13 +357,14 @@ export default function Home() {
     setStatus("PGN copied to clipboard");
   };
 
-  const heroSubtitle = useMemo(
-    () =>
-      mode === "strict"
-        ? "Strict Mode: 3 illegal moves forfeits the match."
-        : "Chaos Mode: illegal moves are executed anyway.",
-    [mode]
-  );
+  const heroSubtitle = useMemo(() => {
+    if (mode === "bullet") {
+      return `Bullet Mode: ${clockMinutes}-minute clocks per side. Flags lose immediately; 3 illegal moves still forfeit.`;
+    }
+    return mode === "strict"
+      ? "Strict Mode: 3 illegal moves forfeits the match."
+      : "Chaos Mode: illegal moves are executed anyway.";
+  }, [mode, clockMinutes]);
 
   return (
     <main className="min-h-screen bg-arena-bg bg-[radial-gradient(circle_at_20%_10%,rgba(77,208,225,0.06),transparent_25%),radial-gradient(circle_at_80%_0%,rgba(167,139,250,0.08),transparent_22%)]">
@@ -313,6 +380,69 @@ export default function Home() {
 
         <section className="space-y-4">
           <div className="glass rounded-2xl p-4 md:p-6 space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <ModelPicker label="Model A (White)" value={whiteModel} onChange={setWhiteModel} options={modelOptions} />
+              <ModelPicker label="Model B (Black)" value={blackModel} onChange={setBlackModel} options={modelOptions} />
+            </div>
+            <div className="flex flex-wrap items-center gap-3">
+              <button
+                onClick={startMatch}
+                disabled={running}
+                className="rounded-md bg-arena-accent px-4 py-2 font-semibold text-black hover:bg-cyan-300 disabled:opacity-50"
+              >
+                {running ? "Match Running..." : "Start Match"}
+              </button>
+              <button
+                onClick={stopMatch}
+                disabled={!running}
+                className="rounded-md border border-white/10 px-3 py-2 text-sm hover:border-arena-accent disabled:opacity-40"
+              >
+                Stop
+              </button>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-sm text-slate-300">Mode</span>
+                <div className="flex gap-2">
+                  {(["strict", "chaos", "bullet"] as MatchMode[]).map((m) => (
+                    <button
+                      key={m}
+                      onClick={() => setMode(m)}
+                      disabled={running}
+                      className={clsx(
+                        "rounded-md border px-3 py-2 text-sm transition disabled:opacity-40 disabled:cursor-not-allowed",
+                        mode === m
+                          ? "border-arena-accent bg-arena-accent/10 text-white"
+                          : "border-white/10 text-slate-300 hover:border-arena-accent/50"
+                      )}
+                    >
+                      {m === "strict" ? "Strict" : m === "chaos" ? "Chaos" : "Bullet"}
+                    </button>
+                  ))}
+                </div>
+                {mode === "bullet" && (
+                  <div className="flex items-center gap-1 text-sm">
+                    <span className="text-slate-400">Clock</span>
+                    {[1, 2, 3].map((min) => (
+                      <button
+                        key={min}
+                        onClick={() => setClockMinutes(min)}
+                        disabled={running}
+                        className={clsx(
+                          "rounded-md border px-2 py-1 text-xs sm:text-sm transition disabled:opacity-40 disabled:cursor-not-allowed",
+                          clockMinutes === min
+                            ? "border-arena-accent bg-arena-accent/20 text-white"
+                            : "border-white/10 text-slate-300 hover:border-arena-accent/50"
+                        )}
+                      >
+                        {min}m
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <div className="glass rounded-xl p-4 space-y-3">
             <div className="flex items-center justify-between mb-2">
               <div>
                 <h2 className="text-2xl font-semibold">Arena</h2>
@@ -320,7 +450,7 @@ export default function Home() {
               </div>
               <div className="flex items-center gap-2 text-sm">
                 <span className="px-3 py-1 rounded-full bg-white/5 border border-white/10">
-                  {mode === "strict" ? "Strict" : "Chaos"}
+                  {mode === "strict" ? "Strict" : mode === "chaos" ? "Chaos" : `Bullet (${clockMinutes}m)`}
                 </span>
               </div>
             </div>
@@ -329,9 +459,23 @@ export default function Home() {
               <div className="flex flex-col gap-3 items-start w-full">
                 <div className="bg-arena-card rounded-xl p-3 shadow-card transition-all duration-300 overflow-hidden space-y-2 w-full">
                   <div className="flex items-center justify-between text-sm text-slate-200 px-1">
-                    <span className="font-semibold">
-                      {blackModelMeta?.label ?? "Black"} · Elo {Math.round(getElo(blackModel))} · Strikes {illegalState.black}/3
-                    </span>
+                    <div className="flex items-center gap-2 font-semibold">
+                      <span>
+                        {blackModelMeta?.label ?? "Black"} · Elo {Math.round(getElo(blackModel))} · Strikes {illegalState.black}/3
+                      </span>
+                      {mode === "bullet" && (
+                        <span
+                          className={clsx(
+                            "rounded-md border px-2 py-0.5 font-mono text-xs",
+                            activeTurn === "black"
+                              ? "border-arena-accent/80 bg-arena-accent/10 text-white"
+                              : "border-white/10 bg-white/5 text-slate-200"
+                          )}
+                        >
+                          {formatClock(displayClocks.black)}
+                        </span>
+                      )}
+                    </div>
                     <span className="text-slate-400">{moves.length ? `Ply ${moves.length}` : ""}</span>
                   </div>
                   <div ref={boardContainerRef} className="w-full max-w-[660px] mx-auto">
@@ -350,9 +494,23 @@ export default function Home() {
                     </div>
                   </div>
                   <div className="flex items-center justify-between text-sm text-slate-200 px-1 mt-2">
-                    <span className="font-semibold">
-                      {whiteModelMeta?.label ?? "White"} · Elo {Math.round(getElo(whiteModel))} · Strikes {illegalState.white}/3
-                    </span>
+                    <div className="flex items-center gap-2 font-semibold">
+                      <span>
+                        {whiteModelMeta?.label ?? "White"} · Elo {Math.round(getElo(whiteModel))} · Strikes {illegalState.white}/3
+                      </span>
+                      {mode === "bullet" && (
+                        <span
+                          className={clsx(
+                            "rounded-md border px-2 py-0.5 font-mono text-xs",
+                            activeTurn === "white"
+                              ? "border-arena-accent/80 bg-arena-accent/10 text-white"
+                              : "border-white/10 bg-white/5 text-slate-200"
+                          )}
+                        >
+                          {formatClock(displayClocks.white)}
+                        </span>
+                      )}
+                    </div>
                   </div>
                   <div className="pt-2">
                     <EvalBar orientation="horizontal" evalScore={evalScore} status={evalStatus} />
@@ -388,34 +546,7 @@ export default function Home() {
             </div>
           </div>
 
-          <div className="glass rounded-xl p-4 space-y-3">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <ModelPicker label="Model A (White)" value={whiteModel} onChange={setWhiteModel} options={modelOptions} />
-              <ModelPicker label="Model B (Black)" value={blackModel} onChange={setBlackModel} options={modelOptions} />
-            </div>
-            <div className="flex flex-wrap items-center gap-3">
-              <button
-                onClick={startMatch}
-                disabled={running}
-                className="rounded-md bg-arena-accent px-4 py-2 font-semibold text-black hover:bg-cyan-300 disabled:opacity-50"
-              >
-                {running ? "Match Running..." : "Start Match"}
-              </button>
-              <button
-                onClick={() => setMode(mode === "strict" ? "chaos" : "strict")}
-                className="rounded-md border border-white/10 px-3 py-2 text-sm hover:border-arena-accent"
-              >
-                Toggle {mode === "strict" ? "Chaos" : "Strict"}
-              </button>
-              <button
-                onClick={stopMatch}
-                disabled={!running}
-                className="rounded-md border border-white/10 px-3 py-2 text-sm hover:border-arena-accent disabled:opacity-40"
-              >
-                Stop
-              </button>
-            </div>
-          </div>
+
 
           <div className="grid gap-4 md:grid-cols-2">
             <div className="glass rounded-xl p-4">
@@ -429,6 +560,11 @@ export default function Home() {
                     </span>
                   </p>
                   <p className="text-slate-400">Reason: {result.reason}</p>
+                  {result.clocks && (
+                    <p className="text-xs text-slate-300">
+                      Clocks: White {formatClock(result.clocks.whiteMs)} / Black {formatClock(result.clocks.blackMs)}
+                    </p>
+                  )}
                   <p className="text-xs text-slate-500">Final FEN: {result.finalFen}</p>
                   <div className="text-xs text-slate-300 space-y-1">
                     <div>

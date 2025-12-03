@@ -3,7 +3,7 @@ import { streamText } from "ai";
 import { Chess } from "chess.js";
 import { buildModelPrompt } from "@/lib/prompt";
 import { applyChaosMove, parseUciMove } from "@/lib/chess-utils";
-import { MatchRequest, MatchMode, MatchResult, MatchStreamEvent } from "@/lib/types";
+import { MatchRequest, MatchMode, MatchResult, MatchStreamEvent, MatchClocks } from "@/lib/types";
 
 export const maxDuration = 60;
 export const dynamic = "force-dynamic";
@@ -75,7 +75,8 @@ function buildResult(
   reason: MatchResult["reason"],
   moves: string[],
   illegalCounts: MatchResult["illegalCounts"],
-  chess: Chess
+  chess: Chess,
+  clocks?: MatchClocks
 ): MatchResult {
   const pgn = chess.history().length > 0 ? chess.pgn({ newline: "\n" }) : moves.join(" ");
   return {
@@ -84,12 +85,19 @@ function buildResult(
     moves,
     pgn,
     illegalCounts,
+    clocks,
     finalFen: chess.fen()
   };
 }
 
-function resultFromDraw(reason: MatchResult["reason"], moves: string[], illegalCounts: MatchResult["illegalCounts"], chess: Chess) {
-  return buildResult("draw", reason, moves, illegalCounts, chess);
+function resultFromDraw(
+  reason: MatchResult["reason"],
+  moves: string[],
+  illegalCounts: MatchResult["illegalCounts"],
+  chess: Chess,
+  clocks?: MatchClocks
+) {
+  return buildResult("draw", reason, moves, illegalCounts, chess, clocks);
 }
 
 export async function POST(req: NextRequest) {
@@ -107,10 +115,14 @@ export async function POST(req: NextRequest) {
     return new Response("Invalid JSON", { status: 400 });
   }
 
-  const { whiteModel, blackModel, mode } = body;
+  const { whiteModel, blackModel, mode, clockMinutes } = body;
   if (!whiteModel || !blackModel) {
     return new Response("whiteModel and blackModel are required", { status: 400 });
   }
+  const isBullet = mode === "bullet";
+  const requestedMinutes = Number(clockMinutes ?? 3);
+  const safeClockMinutes = Number.isFinite(requestedMinutes) ? requestedMinutes : 3;
+  const initialClockMs = isBullet ? Math.min(3, Math.max(1, safeClockMinutes)) * 60_000 : 0;
 
   const stream = new ReadableStream({
     async start(controller) {
@@ -123,17 +135,25 @@ export async function POST(req: NextRequest) {
         white: undefined,
         black: undefined
       };
+      const clocks = { white: initialClockMs, black: initialClockMs };
 
-      send(controller, { type: "status", message: "Match starting" });
+      send(controller, {
+        type: "status",
+        message: "Match starting",
+        clocks: isBullet ? { whiteMs: clocks.white, blackMs: clocks.black } : undefined
+      });
 
       for (let ply = 0; ply < MAX_PLY; ply++) {
         const activeColor = chess.turn() === "w" ? "white" : "black";
         const activeModel = activeColor === "white" ? whiteModel : blackModel;
+        const opponent = activeColor === "white" ? "black" : "white";
         const prompt = buildModelPrompt({
           fen,
           history: moves,
           activeColor,
           mode: mode as MatchMode,
+          clockMsRemaining: isBullet ? clocks[activeColor] : undefined,
+          initialClockMs: isBullet ? initialClockMs : undefined,
           lastMove: lastIllegal[activeColor]
             ? {
                 wasIllegal: true,
@@ -146,25 +166,58 @@ export async function POST(req: NextRequest) {
         let rawMove = "";
         const moveStartTime = Date.now();
         try {
-          rawMove = await fetchMove(activeModel, prompt);
+          const perMoveTimeout = isBullet
+            ? Math.max(500, Math.min(MOVE_TIMEOUT_MS, clocks[activeColor] || MOVE_TIMEOUT_MS))
+            : MOVE_TIMEOUT_MS;
+          rawMove = await fetchMove(activeModel, prompt, perMoveTimeout);
         } catch (err: any) {
           console.error("Model call failed:", err);
           const winner = activeColor === "white" ? "black" : "white";
           const message =
             err instanceof Error ? err.message : "Model call failed or timed out";
-          const result = buildResult(winner, "timeout", moves, illegalCounts, chess);
+          const result = buildResult(
+            winner,
+            "timeout",
+            moves,
+            illegalCounts,
+            chess,
+            isBullet ? { whiteMs: clocks.white, blackMs: clocks.black } : undefined
+          );
           send(controller, { type: "status", message: `${activeColor} error: ${message}` });
           send(controller, { type: "end", result });
           controller.close();
           return;
         }
         const moveTime = Date.now() - moveStartTime;
+        if (isBullet) {
+          clocks[activeColor] = Math.max(0, clocks[activeColor] - moveTime);
+          if (clocks[activeColor] <= 0) {
+            const clockSnapshot = { whiteMs: clocks.white, blackMs: clocks.black };
+            const result = buildResult(opponent, "timeout", moves, illegalCounts, chess, clockSnapshot);
+            send(controller, {
+              type: "status",
+              message: `${activeColor} flagged on time (${moveTime}ms used)`,
+              illegalCounts,
+              clocks: clockSnapshot
+            });
+            send(controller, { type: "end", result });
+            controller.close();
+            return;
+          }
+        }
 
         const rawTrimmed = rawMove.trim();
         const cleaned = rawTrimmed.toLowerCase();
         if (cleaned === "resign") {
           const winner = activeColor === "white" ? "black" : "white";
-          const result = buildResult(winner, "resignation", moves, illegalCounts, chess);
+          const result = buildResult(
+            winner,
+            "resignation",
+            moves,
+            illegalCounts,
+            chess,
+            isBullet ? { whiteMs: clocks.white, blackMs: clocks.black } : undefined
+          );
           send(controller, {
             type: "move",
             move: "resign",
@@ -172,6 +225,7 @@ export async function POST(req: NextRequest) {
             ply,
             activeColor,
             illegalCounts,
+            clocks: isBullet ? { whiteMs: clocks.white, blackMs: clocks.black } : undefined,
             timestamp: moveTime
           });
           send(controller, { type: "end", result });
@@ -179,7 +233,6 @@ export async function POST(req: NextRequest) {
           return;
         }
 
-        const opponent = activeColor === "white" ? "black" : "white";
         let moveResult = null;
         try {
           moveResult = chess.move(rawTrimmed, { sloppy: true } as any);
@@ -237,7 +290,8 @@ export async function POST(req: NextRequest) {
           send(controller, {
             type: "status",
             message: `${activeColor} played illegal move ${cleaned || "empty"}: ${reason} (${illegalCounts[activeColor]} strikes)`,
-            illegalCounts
+            illegalCounts,
+            clocks: isBullet ? { whiteMs: clocks.white, blackMs: clocks.black } : undefined
           });
 
           if (mode === "chaos") {
@@ -258,14 +312,22 @@ export async function POST(req: NextRequest) {
                 ply,
                 activeColor,
                 illegalCounts,
+                clocks: isBullet ? { whiteMs: clocks.white, blackMs: clocks.black } : undefined,
                 note: "Chaos move executed despite illegality",
                 timestamp: moveTime
               });
             }
           }
 
-          if (mode === "strict" && illegalCounts[activeColor] >= 3) {
-            const result = buildResult(opponent, "illegal", moves, illegalCounts, chess);
+          if ((mode === "strict" || mode === "bullet") && illegalCounts[activeColor] >= 3) {
+            const result = buildResult(
+              opponent,
+              "illegal",
+              moves,
+              illegalCounts,
+              chess,
+              isBullet ? { whiteMs: clocks.white, blackMs: clocks.black } : undefined
+            );
             send(controller, { type: "end", result });
             controller.close();
             return;
@@ -291,46 +353,84 @@ export async function POST(req: NextRequest) {
           ply,
           activeColor,
           illegalCounts,
+          clocks: isBullet ? { whiteMs: clocks.white, blackMs: clocks.black } : undefined,
           timestamp: moveTime
         });
 
         if (chess.isCheckmate()) {
-          const result = buildResult(activeColor, "checkmate", moves, illegalCounts, chess);
+          const result = buildResult(
+            activeColor,
+            "checkmate",
+            moves,
+            illegalCounts,
+            chess,
+            isBullet ? { whiteMs: clocks.white, blackMs: clocks.black } : undefined
+          );
           send(controller, { type: "end", result });
           controller.close();
           return;
         }
 
         if (chess.isStalemate()) {
-          const result = resultFromDraw("stalemate", moves, illegalCounts, chess);
+          const result = resultFromDraw(
+            "stalemate",
+            moves,
+            illegalCounts,
+            chess,
+            isBullet ? { whiteMs: clocks.white, blackMs: clocks.black } : undefined
+          );
           send(controller, { type: "end", result });
           controller.close();
           return;
         }
 
         if (chess.isThreefoldRepetition()) {
-          const result = resultFromDraw("threefold", moves, illegalCounts, chess);
+          const result = resultFromDraw(
+            "threefold",
+            moves,
+            illegalCounts,
+            chess,
+            isBullet ? { whiteMs: clocks.white, blackMs: clocks.black } : undefined
+          );
           send(controller, { type: "end", result });
           controller.close();
           return;
         }
 
         if (chess.isInsufficientMaterial()) {
-          const result = resultFromDraw("insufficient", moves, illegalCounts, chess);
+          const result = resultFromDraw(
+            "insufficient",
+            moves,
+            illegalCounts,
+            chess,
+            isBullet ? { whiteMs: clocks.white, blackMs: clocks.black } : undefined
+          );
           send(controller, { type: "end", result });
           controller.close();
           return;
         }
 
         if (chess.isDraw()) {
-          const result = resultFromDraw("fifty-move", moves, illegalCounts, chess);
+          const result = resultFromDraw(
+            "fifty-move",
+            moves,
+            illegalCounts,
+            chess,
+            isBullet ? { whiteMs: clocks.white, blackMs: clocks.black } : undefined
+          );
           send(controller, { type: "end", result });
           controller.close();
           return;
         }
       }
 
-      const result = resultFromDraw("max-move", moves, illegalCounts, chess);
+      const result = resultFromDraw(
+        "max-move",
+        moves,
+        illegalCounts,
+        chess,
+        isBullet ? { whiteMs: clocks.white, blackMs: clocks.black } : undefined
+      );
       send(controller, { type: "end", result });
       controller.close();
     }

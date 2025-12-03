@@ -1,9 +1,15 @@
-export type MatchMode = "strict" | "chaos";
+export type MatchMode = "strict" | "chaos" | "bullet";
+
+export interface MatchClocks {
+  whiteMs: number;
+  blackMs: number;
+}
 
 export interface MatchRequest {
   whiteModel: string;
   blackModel: string;
   mode: MatchMode;
+  clockMinutes?: number;
 }
 
 export interface MatchMoveEvent {
@@ -18,6 +24,7 @@ export interface MatchMoveEvent {
     white: number;
     black: number;
   };
+  clocks?: MatchClocks;
   note?: string;
   timestamp?: number; // milliseconds since move started
 }
@@ -29,6 +36,7 @@ export interface MatchStatusEvent {
     white: number;
     black: number;
   };
+  clocks?: MatchClocks;
 }
 
 export interface MatchEndEvent {
@@ -58,6 +66,7 @@ export interface MatchResult {
     white: number;
     black: number;
   };
+  clocks?: MatchClocks;
   finalFen: string;
 }
 
@@ -75,6 +84,7 @@ export interface ArenaModelOption {
 export interface TournamentRequest {
   models: string[];
   mode: MatchMode;
+  clockMinutes?: number;
 }
 
 export interface TournamentMatch {

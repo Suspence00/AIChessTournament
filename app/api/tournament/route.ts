@@ -9,7 +9,8 @@ import {
   TournamentMatch,
   TournamentRequest,
   TournamentResult,
-  TournamentStanding
+  TournamentStanding,
+  MatchClocks
 } from "@/lib/types";
 
 export const maxDuration = 120;
@@ -73,7 +74,8 @@ function buildResult(
   reason: MatchResult["reason"],
   moves: string[],
   illegalCounts: MatchResult["illegalCounts"],
-  chess: Chess
+  chess: Chess,
+  clocks?: MatchClocks
 ): MatchResult {
   const pgn = chess.history().length > 0 ? chess.pgn({ newline: "\n" }) : moves.join(" ");
   return {
@@ -82,6 +84,7 @@ function buildResult(
     moves,
     pgn,
     illegalCounts,
+    clocks,
     finalFen: chess.fen()
   };
 }
@@ -90,15 +93,17 @@ function resultFromDraw(
   reason: MatchResult["reason"],
   moves: string[],
   illegalCounts: MatchResult["illegalCounts"],
-  chess: Chess
+  chess: Chess,
+  clocks?: MatchClocks
 ) {
-  return buildResult("draw", reason, moves, illegalCounts, chess);
+  return buildResult("draw", reason, moves, illegalCounts, chess, clocks);
 }
 
 async function playMatch(
   whiteModel: string,
   blackModel: string,
-  mode: MatchMode
+  mode: MatchMode,
+  clockMinutes?: number
 ): Promise<MatchResult> {
   let fen = new Chess().fen();
   let chess = new Chess(fen);
@@ -109,15 +114,23 @@ async function playMatch(
     white: undefined,
     black: undefined
   };
+  const isBullet = mode === "bullet";
+  const requestedMinutes = Number(clockMinutes ?? 3);
+  const safeClockMinutes = Number.isFinite(requestedMinutes) ? requestedMinutes : 3;
+  const initialClockMs = isBullet ? Math.min(3, Math.max(1, safeClockMinutes)) * 60_000 : 0;
+  const clocks = { white: initialClockMs, black: initialClockMs };
 
   for (let ply = 0; ply < MAX_PLY; ply++) {
     const activeColor = chess.turn() === "w" ? "white" : "black";
     const activeModel = activeColor === "white" ? whiteModel : blackModel;
+    const opponent = activeColor === "white" ? "black" : "white";
     const prompt = buildModelPrompt({
       fen,
       history: moves,
       activeColor,
       mode,
+      clockMsRemaining: isBullet ? clocks[activeColor] : undefined,
+      initialClockMs: isBullet ? initialClockMs : undefined,
       lastMove: lastIllegal[activeColor]
         ? {
             wasIllegal: true,
@@ -128,22 +141,49 @@ async function playMatch(
     });
 
     let rawMove = "";
+    const moveStartTime = Date.now();
     try {
-      rawMove = await fetchMove(activeModel, prompt);
+      const perMoveTimeout = isBullet
+        ? Math.max(500, Math.min(MOVE_TIMEOUT_MS, clocks[activeColor] || MOVE_TIMEOUT_MS))
+        : MOVE_TIMEOUT_MS;
+      rawMove = await fetchMove(activeModel, prompt, perMoveTimeout);
     } catch (err: any) {
       console.error("Model call failed:", err);
       const winner = activeColor === "white" ? "black" : "white";
-      return buildResult(winner, "timeout", moves, illegalCounts, chess);
+      return buildResult(
+        winner,
+        "timeout",
+        moves,
+        illegalCounts,
+        chess,
+        isBullet ? { whiteMs: clocks.white, blackMs: clocks.black } : undefined
+      );
+    }
+    const moveTime = Date.now() - moveStartTime;
+    if (isBullet) {
+      clocks[activeColor] = Math.max(0, clocks[activeColor] - moveTime);
+      if (clocks[activeColor] <= 0) {
+        return buildResult(opponent, "timeout", moves, illegalCounts, chess, {
+          whiteMs: clocks.white,
+          blackMs: clocks.black
+        });
+      }
     }
 
     const rawTrimmed = rawMove.trim();
     const cleaned = rawTrimmed.toLowerCase();
     if (cleaned === "resign") {
       const winner = activeColor === "white" ? "black" : "white";
-      return buildResult(winner, "resignation", moves, illegalCounts, chess);
+      return buildResult(
+        winner,
+        "resignation",
+        moves,
+        illegalCounts,
+        chess,
+        isBullet ? { whiteMs: clocks.white, blackMs: clocks.black } : undefined
+      );
     }
 
-    const opponent = activeColor === "white" ? "black" : "white";
     let moveResult = null;
     try {
       moveResult = chess.move(rawTrimmed, { sloppy: true } as any);
@@ -169,8 +209,15 @@ async function playMatch(
         }
       }
 
-      if (mode === "strict" && illegalCounts[activeColor] >= 3) {
-        return buildResult(opponent, "illegal", moves, illegalCounts, chess);
+      if ((mode === "strict" || mode === "bullet") && illegalCounts[activeColor] >= 3) {
+        return buildResult(
+          opponent,
+          "illegal",
+          moves,
+          illegalCounts,
+          chess,
+          isBullet ? { whiteMs: clocks.white, blackMs: clocks.black } : undefined
+        );
       }
 
       continue;
@@ -184,27 +231,64 @@ async function playMatch(
     moves.push(moveUci);
 
     if (chess.isCheckmate()) {
-      return buildResult(activeColor, "checkmate", moves, illegalCounts, chess);
+      return buildResult(
+        activeColor,
+        "checkmate",
+        moves,
+        illegalCounts,
+        chess,
+        isBullet ? { whiteMs: clocks.white, blackMs: clocks.black } : undefined
+      );
     }
 
     if (chess.isStalemate()) {
-      return resultFromDraw("stalemate", moves, illegalCounts, chess);
+      return resultFromDraw(
+        "stalemate",
+        moves,
+        illegalCounts,
+        chess,
+        isBullet ? { whiteMs: clocks.white, blackMs: clocks.black } : undefined
+      );
     }
 
     if (chess.isThreefoldRepetition()) {
-      return resultFromDraw("threefold", moves, illegalCounts, chess);
+      return resultFromDraw(
+        "threefold",
+        moves,
+        illegalCounts,
+        chess,
+        isBullet ? { whiteMs: clocks.white, blackMs: clocks.black } : undefined
+      );
     }
 
     if (chess.isInsufficientMaterial()) {
-      return resultFromDraw("insufficient", moves, illegalCounts, chess);
+      return resultFromDraw(
+        "insufficient",
+        moves,
+        illegalCounts,
+        chess,
+        isBullet ? { whiteMs: clocks.white, blackMs: clocks.black } : undefined
+      );
     }
 
     if (chess.isDraw()) {
-      return resultFromDraw("fifty-move", moves, illegalCounts, chess);
+      return resultFromDraw(
+        "fifty-move",
+        moves,
+        illegalCounts,
+        chess,
+        isBullet ? { whiteMs: clocks.white, blackMs: clocks.black } : undefined
+      );
     }
   }
 
-  return resultFromDraw("max-move", moves, illegalCounts, chess);
+  return resultFromDraw(
+    "max-move",
+    moves,
+    illegalCounts,
+    chess,
+    isBullet ? { whiteMs: clocks.white, blackMs: clocks.black } : undefined
+  );
 }
 
 const BASE_RATING = 1000;
@@ -322,7 +406,7 @@ export async function POST(req: NextRequest) {
     return new Response("Invalid JSON", { status: 400 });
   }
 
-  const { models, mode } = body;
+  const { models, mode, clockMinutes } = body;
   if (!Array.isArray(models) || models.length < 2) {
     return new Response("Provide at least two models", { status: 400 });
   }
@@ -338,7 +422,7 @@ export async function POST(req: NextRequest) {
     for (let j = i + 1; j < models.length; j++) {
       const asWhite = (i + j) % 2 === 0 ? models[i] : models[j];
       const asBlack = asWhite === models[i] ? models[j] : models[i];
-      const result = await playMatch(asWhite, asBlack, mode);
+      const result = await playMatch(asWhite, asBlack, mode, clockMinutes);
       matches.push({ white: asWhite, black: asBlack, result });
       updateRatings(ratings, asWhite, asBlack, result);
     }

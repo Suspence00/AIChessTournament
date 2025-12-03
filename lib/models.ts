@@ -26,34 +26,9 @@ export const modelOptions: ArenaModelOption[] = [
   { label: "GPT-5.1 Thinking", value: "openai/gpt-5.1-thinking", provider: "OpenAI", context: "400K", inputCostPerMTokens: 1.25, outputCostPerMTokens: 10.00, cacheReadCostPerMTokens: 0.13 },
   { label: "GPT-4o Mini", value: "openai/gpt-4o-mini", provider: "OpenAI", context: "128K", inputCostPerMTokens: 0.15, outputCostPerMTokens: 0.60, cacheReadCostPerMTokens: 0.07 },
   { label: "GPT-4.1 Mini", value: "openai/gpt-4.1-mini", provider: "OpenAI", context: "1M", inputCostPerMTokens: 0.40, outputCostPerMTokens: 1.60, cacheReadCostPerMTokens: 0.10 },
-  // GPT-5 Nano (image) removed
-  { label: "GPT-OSS 20B", value: "openai/gpt-oss-20b", provider: "OpenAI", context: "128K", inputCostPerMTokens: 0.07, outputCostPerMTokens: 0.30 },
-
-  // DeepSeek
-  { label: "DeepSeek V3.2 Thinking", value: "deepseek/deepseek-v3.2-thinking", provider: "DeepSeek", context: "128K", inputCostPerMTokens: 0.28, outputCostPerMTokens: 0.42, cacheReadCostPerMTokens: 0.03 },
-
-  // Minimax
-  { label: "Minimax M2", value: "minimax/minimax-m2", provider: "Minimax", context: "205K", inputCostPerMTokens: 0.27, outputCostPerMTokens: 1.15 },
-
-  // Meituan
-  { label: "Longcat Flash Chat", value: "meituan/longcat-flash-chat", provider: "Meituan", context: "128K" },
-
-  // Amazon
-  { label: "Nova Micro", value: "amazon/nova-micro", provider: "Amazon", context: "128K", inputCostPerMTokens: 0.04, outputCostPerMTokens: 0.14 },
-  { label: "Nova Lite", value: "amazon/nova-lite", provider: "Amazon", context: "300K", inputCostPerMTokens: 0.06, outputCostPerMTokens: 0.24 },
-
-  // Mistral
-  { label: "Ministral 3B", value: "mistral/ministral-3b", provider: "Mistral", context: "128K", inputCostPerMTokens: 0.04, outputCostPerMTokens: 0.04 },
-
-  // Arcee
-  { label: "Trinity Mini", value: "arcee-ai/trinity-mini", provider: "Arcee", context: "131K", inputCostPerMTokens: 0.04, outputCostPerMTokens: 0.15 },
 
   // Meta
-  { label: "Llama 3.1 8B", value: "meta/llama-3.1-8b", provider: "Meta", context: "128K", inputCostPerMTokens: 0.05, outputCostPerMTokens: 0.08 },
-
-  // Alibaba
-  { label: "Qwen 3 14B", value: "alibaba/qwen-3-14b", provider: "Alibaba", context: "41K", inputCostPerMTokens: 0.06, outputCostPerMTokens: 0.24 },
-  { label: "Qwen3 Coder 30B A3B", value: "alibaba/qwen3-coder-30b-a3b", provider: "Alibaba", context: "262K", inputCostPerMTokens: 0.07, outputCostPerMTokens: 0.27 }
+  { label: "Llama 3.1 8B", value: "meta/llama-3.1-8b", provider: "Meta", context: "128K", inputCostPerMTokens: 0.05, outputCostPerMTokens: 0.08 }
 ];
 
 // Helper to get models grouped by provider
