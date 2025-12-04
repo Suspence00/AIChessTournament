@@ -6,7 +6,15 @@ import dynamic from "next/dynamic";
 import { Chess } from "chess.js";
 import { modelOptions } from "@/lib/models";
 import { useLocalStorage } from "@/lib/use-local-storage";
-import { MatchClocks, MatchMode, MatchMoveEvent, MatchResult, MatchStreamEvent } from "@/lib/types";
+import {
+  MatchClocks,
+  MatchHistoryEntry,
+  MatchMode,
+  MatchMoveEvent,
+  MatchResult,
+  MatchStatusEvent,
+  MatchStreamEvent
+} from "@/lib/types";
 import { ModelPicker } from "@/components/model-picker";
 import { MoveLog } from "@/components/move-log";
 import { HistoryPanel } from "@/components/history-panel";
@@ -19,6 +27,88 @@ const Chessboard = dynamic(() => import("react-chessboard").then((mod) => mod.Ch
   ssr: false
 });
 
+const HISTORY_LIMIT = 25;
+
+function getWinnerLabel(result: MatchResult, whiteLabel: string, blackLabel: string) {
+  if (result.winner === "white") return whiteLabel;
+  if (result.winner === "black") return blackLabel;
+  return "Draw";
+}
+
+function getReasonLabel(result: MatchResult, whiteLabel: string, blackLabel: string) {
+  const loserColor = result.winner === "white" ? "black" : result.winner === "black" ? "white" : null;
+  const loserLabel = loserColor === "white" ? whiteLabel : loserColor === "black" ? blackLabel : null;
+  const preferredIllegal =
+    (loserColor && result.lastIllegalMoves?.[loserColor]) ||
+    result.lastIllegalMoves?.black ||
+    result.lastIllegalMoves?.white;
+
+  switch (result.reason) {
+    case "illegal": {
+      if (!loserLabel) return "Illegal move";
+      const strikes = preferredIllegal?.strikes ?? 3;
+      return `${loserLabel} hit ${strikes} strikes (illegal move)`;
+    }
+    case "timeout":
+      return loserLabel ? `${loserLabel} flagged on time` : "Timeout";
+    case "resignation":
+      return loserLabel ? `${loserLabel} resigned` : "Resignation";
+    case "checkmate":
+      return "Checkmate";
+    case "stalemate":
+      return "Stalemate";
+    case "threefold":
+      return "Threefold repetition";
+    case "fifty-move":
+      return "50-move rule";
+    case "insufficient":
+      return "Insufficient material";
+    case "max-move":
+      return "Move cap reached";
+    default:
+      return result.reason;
+  }
+}
+
+function getIllegalNote(result: MatchResult, whiteLabel: string, blackLabel: string) {
+  const loserColor = result.winner === "white" ? "black" : result.winner === "black" ? "white" : null;
+  const detail =
+    (loserColor && result.lastIllegalMoves?.[loserColor]) ||
+    result.lastIllegalMoves?.black ||
+    result.lastIllegalMoves?.white;
+  if (!detail) return undefined;
+  const who = detail.by === "white" ? whiteLabel : blackLabel;
+  return `${who} tried "${detail.move}" (${detail.reason})`;
+}
+
+function migrateHistory(rawHistory: Array<MatchHistoryEntry | MatchResult> = []): MatchHistoryEntry[] {
+  if (!Array.isArray(rawHistory)) return [];
+  return rawHistory
+    .map((entry, idx) => {
+      if ((entry as MatchHistoryEntry).result && (entry as MatchHistoryEntry).winnerLabel) {
+        return entry as MatchHistoryEntry;
+      }
+      const result = entry as MatchResult;
+      if (!result || typeof result !== "object" || !("winner" in result)) return null;
+      const whiteLabel = "White";
+      const blackLabel = "Black";
+      return {
+        id: `legacy-${idx}-${result.finalFen ?? "match"}`,
+        playedAt: Date.now() - idx,
+        mode: "strict",
+        white: { id: "unknown-white", label: whiteLabel },
+        black: { id: "unknown-black", label: blackLabel },
+        clockMinutes: undefined,
+        result,
+        winnerLabel: getWinnerLabel(result, whiteLabel, blackLabel),
+        reasonLabel: getReasonLabel(result, whiteLabel, blackLabel),
+        illegalNote: getIllegalNote(result, whiteLabel, blackLabel)
+      };
+    })
+    .filter(Boolean)
+    .slice(-HISTORY_LIMIT) as MatchHistoryEntry[];
+}
+
 export default function Home() {
   const [whiteModel, setWhiteModel] = useState(modelOptions[0]?.value ?? "");
   const [blackModel, setBlackModel] = useState(modelOptions[1]?.value ?? "");
@@ -28,12 +118,17 @@ export default function Home() {
   const [status, setStatus] = useState<string>("Waiting to start");
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState<MatchResult | null>(null);
-  const [history, setHistory] = useLocalStorage<MatchResult[]>("arena-history", []);
+  const [historyRaw, setHistoryRaw] = useLocalStorage<Array<MatchHistoryEntry | MatchResult>>(
+    "arena-history",
+    []
+  );
+  const history = useMemo(() => migrateHistory(historyRaw), [historyRaw]);
   const [apiKey, setApiKey] = useLocalStorage<string>("arena-api-key", "");
   const abortRef = useRef<AbortController | null>(null);
   const [eloChart, setEloChart] = useState<Array<{ model: string; rating: number }>>([]);
   const [lastEloDelta, setLastEloDelta] = useState<{ white: number; black: number }>({ white: 0, black: 0 });
   const [illegalState, setIllegalState] = useState<{ white: number; black: number }>({ white: 0, black: 0 });
+  const [lastIllegalMove, setLastIllegalMove] = useState<MatchStatusEvent["illegalMove"] | null>(null);
   const [evalScore, setEvalScore] = useState<number | null>(null);
   const [evalStatus, setEvalStatus] = useState<string>("Idle");
   const [evalEnabled, setEvalEnabled] = useState(true);
@@ -49,6 +144,8 @@ export default function Home() {
   const evalDebounceRef = useRef<number | null>(null);
   const evalControllerRef = useRef<AbortController | null>(null);
   const evalRequestIdRef = useRef(0);
+  const pgnCopiedTimeoutRef = useRef<number | null>(null);
+  const [pgnCopiedLabel, setPgnCopiedLabel] = useState<string | null>(null);
   const activeColorFromFen = () => (fen.split(" ")[1] === "w" ? "white" : "black");
   const activeColor = activeColorFromFen();
   const bulletInitialMs = Math.min(3, Math.max(1, clockMinutes)) * 60_000;
@@ -69,6 +166,11 @@ export default function Home() {
   const getElo = (modelValue: string) => {
     return eloChart.find((e) => e.model === modelValue)?.rating ?? 1000;
   };
+  const whiteLabel = whiteModelMeta?.label ?? "White";
+  const blackLabel = blackModelMeta?.label ?? "Black";
+  const currentWinnerLabel = result ? getWinnerLabel(result, whiteLabel, blackLabel) : "";
+  const currentReasonLabel = result ? getReasonLabel(result, whiteLabel, blackLabel) : "";
+  const currentIllegalNote = result ? getIllegalNote(result, whiteLabel, blackLabel) : undefined;
 
   const playSound = (type: "move" | "capture" | "gameover" | "illegal") => {
     try {
@@ -150,12 +252,6 @@ export default function Home() {
   }, [boardExpanded]);
 
   useEffect(() => {
-    if (history.length > 25) {
-      setHistory(history.slice(-25));
-    }
-  }, [history, setHistory]);
-
-  useEffect(() => {
     if (mode !== "bullet") {
       setDisplayClocks({ white: clocks.white, black: clocks.black });
       return;
@@ -200,6 +296,9 @@ export default function Home() {
       if (evalDebounceRef.current) {
         window.clearTimeout(evalDebounceRef.current);
       }
+      if (pgnCopiedTimeoutRef.current) {
+        window.clearTimeout(pgnCopiedTimeoutRef.current);
+      }
     };
   }, []);
 
@@ -223,6 +322,9 @@ export default function Home() {
           return event.illegalCounts!;
         });
       }
+      if (event.illegalMove) {
+        setLastIllegalMove(event.illegalMove);
+      }
       setStatus(event.message);
       syncClocksFromEvent(event.clocks, activeColorFromFen());
       return;
@@ -232,6 +334,9 @@ export default function Home() {
       setFen(event.fen);
       setMoves((prev) => [...prev, event]);
       setIllegalState(event.illegalCounts);
+      if (lastIllegalMove && event.illegalCounts && event.illegalCounts[lastIllegalMove.by] === 0) {
+        setLastIllegalMove(null);
+      }
       const nextTurn = event.fen.split(" ")[1] === "w" ? "white" : "black";
       syncClocksFromEvent(event.clocks, nextTurn);
       const isCapture = event.san?.includes("x");
@@ -245,9 +350,39 @@ export default function Home() {
       setTurnStartTs(null);
       setActiveTurn(null);
       setResult(event.result);
-      setHistory((prev) => [...prev, event.result]);
+      const winnerLabel = getWinnerLabel(event.result, whiteLabel, blackLabel);
+      const reasonLabel = getReasonLabel(event.result, whiteLabel, blackLabel);
+      const illegalNote = getIllegalNote(event.result, whiteLabel, blackLabel);
+      const illegalFromResult =
+        (event.result.winner === "white" && event.result.lastIllegalMoves?.black) ||
+        (event.result.winner === "black" && event.result.lastIllegalMoves?.white) ||
+        event.result.lastIllegalMoves?.black ||
+        event.result.lastIllegalMoves?.white;
+      if (illegalFromResult) {
+        setLastIllegalMove(illegalFromResult);
+      }
+      setHistoryRaw((prev) => {
+        const normalized = migrateHistory(prev);
+        const entry: MatchHistoryEntry = {
+          id: `match-${Date.now()}`,
+          playedAt: Date.now(),
+          mode,
+          clockMinutes: mode === "bullet" ? clockMinutes : undefined,
+          white: { id: whiteModel, label: whiteLabel },
+          black: { id: blackModel, label: blackLabel },
+          result: event.result,
+          winnerLabel,
+          reasonLabel,
+          illegalNote
+        };
+        return [...normalized, entry].slice(-HISTORY_LIMIT);
+      });
       setRunning(false);
-      setStatus(`Winner: ${event.result.winner} via ${event.result.reason}`);
+      setStatus(
+        event.result.winner === "draw"
+          ? `Draw - ${reasonLabel}`
+          : `Winner: ${winnerLabel} (${reasonLabel})`
+      );
       playSound("gameover");
       setIllegalState(event.result.illegalCounts);
       queueEvaluation(event.result.finalFen);
@@ -301,6 +436,9 @@ export default function Home() {
     setStatus("Launching bots via Vercel AI Gateway...");
     setMoves([]);
     setResult(null);
+    setIllegalState({ white: 0, black: 0 });
+    setLastIllegalMove(null);
+    setPgnCopiedLabel(null);
     const startFen = new Chess().fen();
     setFen(startFen);
     if (mode === "bullet") {
@@ -404,10 +542,46 @@ export default function Home() {
     setStatus("Replay finished");
   };
 
+  const showPgnCopied = (label: string) => {
+    if (pgnCopiedTimeoutRef.current) {
+      window.clearTimeout(pgnCopiedTimeoutRef.current);
+    }
+    setPgnCopiedLabel(label);
+    pgnCopiedTimeoutRef.current = window.setTimeout(() => {
+      setPgnCopiedLabel(null);
+    }, 1800);
+  };
+
+  const copyPgnText = async (pgn: string, label: string) => {
+    if (!pgn) {
+      setStatus("No PGN available to export");
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(pgn);
+      setStatus(`PGN copied (${label})`);
+      showPgnCopied(label);
+    } catch {
+      try {
+        const blob = new Blob([pgn], { type: "application/x-chess-pgn" });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = `${label.replace(/\s+/g, "-").toLowerCase()}-${Date.now()}.pgn`;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(url);
+        setStatus("Clipboard blocked - downloaded PGN instead");
+      } catch {
+        setStatus("Unable to export PGN");
+      }
+    }
+  };
+
   const copyPgn = async () => {
     if (!result?.pgn) return;
-    await navigator.clipboard.writeText(result.pgn);
-    setStatus("PGN copied to clipboard");
+    await copyPgnText(result.pgn, `${whiteLabel} vs ${blackLabel}`);
   };
 
   const heroSubtitle = useMemo(() => {
@@ -536,7 +710,7 @@ export default function Home() {
                   <div className="flex items-center justify-between text-sm text-slate-200 px-1">
                     <div className="flex items-center gap-2 font-semibold">
                       <span>
-                        {blackModelMeta?.label ?? "Black"} · Elo {Math.round(getElo(blackModel))} · Strikes {illegalState.black}/3
+                        {blackLabel} | Elo {Math.round(getElo(blackModel))} | Strikes {illegalState.black}/3
                       </span>
                       {mode === "bullet" && (
                         <span
@@ -571,7 +745,7 @@ export default function Home() {
                   <div className="flex items-center justify-between text-sm text-slate-200 px-1 mt-2">
                     <div className="flex items-center gap-2 font-semibold">
                       <span>
-                        {whiteModelMeta?.label ?? "White"} · Elo {Math.round(getElo(whiteModel))} · Strikes {illegalState.white}/3
+                        {whiteLabel} | Elo {Math.round(getElo(whiteModel))} | Strikes {illegalState.white}/3
                       </span>
                       {mode === "bullet" && (
                         <span
@@ -619,14 +793,14 @@ export default function Home() {
                     <>
                       <span>
                         {activeColorFromFen() === "white"
-                          ? `${whiteModelMeta?.label ?? "White"} is thinking`
-                          : `${blackModelMeta?.label ?? "Black"} is thinking`}
+                          ? `${whiteLabel} is thinking`
+                          : `${blackLabel} is thinking`}
                       </span>
                       <span className="font-mono text-xs text-slate-400">...</span>
                     </>
                   ) : result ? (
                     <span>
-                      Game over: {result.winner === "draw" ? "Draw" : `${result.winner} wins`} ({result.reason})
+                      Game over: {result.winner === "draw" ? "Draw" : `${currentWinnerLabel} wins`} ({currentReasonLabel})
                     </span>
                   ) : (
                     <span>Idle</span>
@@ -634,8 +808,9 @@ export default function Home() {
                 </div>
                 <MoveLog
                   moves={moves}
-                  whiteName={whiteModelMeta?.label ?? "White"}
-                  blackName={blackModelMeta?.label ?? "Black"}
+                  whiteName={whiteLabel}
+                  blackName={blackLabel}
+                  latestIllegal={lastIllegalMove}
                 />
               </div>
             </div>
@@ -643,18 +818,28 @@ export default function Home() {
 
 
 
-          <div className="grid gap-4 md:grid-cols-2">
-            <div className="glass rounded-xl p-4">
-              <h3 className="text-lg font-semibold mb-2">Result & Elo Change</h3>
-              {result ? (
-                <div className="space-y-2 text-sm">
-                  <p className="text-xl font-bold">
-                    Winner:{" "}
+        <div className="grid gap-4 md:grid-cols-2">
+          <div className="glass rounded-xl p-4">
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-lg font-semibold">Result & Elo Change</h3>
+              {pgnCopiedLabel && (
+                <span className="text-[11px] rounded-full bg-arena-accent/15 text-arena-accent px-2 py-1">
+                  PGN copied: {pgnCopiedLabel}
+                </span>
+              )}
+            </div>
+            {result ? (
+              <div className="space-y-2 text-sm">
+                <p className="text-xl font-bold">
+                  Winner:{" "}
                     <span className="text-arena-accent">
-                      {result.winner === "draw" ? "Draw" : result.winner}
+                      {result.winner === "draw" ? "Draw" : currentWinnerLabel}
                     </span>
                   </p>
-                  <p className="text-slate-400">Reason: {result.reason}</p>
+                  <p className="text-slate-400">Reason: {currentReasonLabel}</p>
+                  {currentIllegalNote && (
+                    <p className="text-xs text-red-200">Illegal attempt: {currentIllegalNote}</p>
+                  )}
                   {result.clocks && (
                     <p className="text-xs text-slate-300">
                       Clocks: White {formatClock(result.clocks.whiteMs)} / Black {formatClock(result.clocks.blackMs)}
@@ -663,10 +848,10 @@ export default function Home() {
                   <p className="text-xs text-slate-500">Final FEN: {result.finalFen}</p>
                   <div className="text-xs text-slate-300 space-y-1">
                     <div>
-                      {whiteModelMeta?.label ?? "White"} Elo: {Math.round(getElo(whiteModel))} ({lastEloDelta.white >= 0 ? "+" : ""}{lastEloDelta.white.toFixed(1)})
+                      {whiteLabel} Elo: {Math.round(getElo(whiteModel))} ({lastEloDelta.white >= 0 ? "+" : ""}{lastEloDelta.white.toFixed(1)})
                     </div>
                     <div>
-                      {blackModelMeta?.label ?? "Black"} Elo: {Math.round(getElo(blackModel))} ({lastEloDelta.black >= 0 ? "+" : ""}{lastEloDelta.black.toFixed(1)})
+                      {blackLabel} Elo: {Math.round(getElo(blackModel))} ({lastEloDelta.black >= 0 ? "+" : ""}{lastEloDelta.black.toFixed(1)})
                     </div>
                   </div>
                   <div className="flex gap-2 pt-2">
@@ -701,13 +886,13 @@ export default function Home() {
                   </span>
                 </div>
                 <div className="flex justify-between">
-                  <span>{whiteModelMeta?.label ?? "White model"} est. cost</span>
+                  <span>{whiteLabel} est. cost</span>
                   <span className="font-mono text-arena-accent">
                     {estCostWhite ? `$${estCostWhite.toFixed(4)}` : "n/a"}
                   </span>
                 </div>
                 <div className="flex justify-between">
-                  <span>{blackModelMeta?.label ?? "Black model"} est. cost</span>
+                  <span>{blackLabel} est. cost</span>
                   <span className="font-mono text-arena-accent">
                     {estCostBlack ? `$${estCostBlack.toFixed(4)}` : "n/a"}
                   </span>
@@ -752,7 +937,10 @@ export default function Home() {
               </div>
             </div>
 
-            <HistoryPanel history={[...history].reverse()} />
+            <HistoryPanel
+              history={[...history].reverse()}
+              onCopyPgn={(pgn, label) => copyPgnText(pgn, label ?? "match-history")}
+            />
           </div>
         </section>
       </div>

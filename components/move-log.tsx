@@ -1,10 +1,11 @@
-import { MatchMoveEvent } from "@/lib/types";
+import { MatchMoveEvent, MatchStatusEvent } from "@/lib/types";
 import clsx from "clsx";
 
 interface Props {
   moves: MatchMoveEvent[];
   whiteName?: string;
   blackName?: string;
+  latestIllegal?: MatchStatusEvent["illegalMove"];
 }
 
 function formatTime(ms: number | undefined): string {
@@ -16,7 +17,7 @@ function formatTime(ms: number | undefined): string {
   return `${mins}m ${secs}s`;
 }
 
-export function MoveLog({ moves, whiteName = "White", blackName = "Black" }: Props) {
+export function MoveLog({ moves, whiteName = "White", blackName = "Black", latestIllegal }: Props) {
   // Group moves by move number (pair white and black)
   const groupedMoves: Array<{ white?: MatchMoveEvent; black?: MatchMoveEvent; moveNum: number }> = [];
   const isIllegal = (move?: MatchMoveEvent) =>
@@ -47,6 +48,17 @@ export function MoveLog({ moves, whiteName = "White", blackName = "Black" }: Pro
         <h3 className="text-lg font-semibold">Live Moves</h3>
         <span className="text-xs text-slate-400">{moves.length} plies</span>
       </div>
+
+      {latestIllegal && (
+        <div className="mb-2 rounded-md border border-red-400/40 bg-red-500/10 px-3 py-2 text-[11px] text-red-100">
+          <span className="font-semibold">Illegal move:</span>{" "}
+          {latestIllegal.by === "white" ? whiteName : blackName} tried{" "}
+          <code className="rounded bg-white/10 px-1 py-[1px] text-[11px] text-red-50">
+            {latestIllegal.move}
+          </code>{" "}
+          ({latestIllegal.reason}). Strike {latestIllegal.strikes}/3.
+        </div>
+      )}
 
       <div className="grid grid-cols-[auto_1fr_auto_1fr_auto] gap-2 items-center py-1 border-b border-white/10 text-xs text-slate-300 mb-1">
         <span className="text-slate-400 font-semibold text-right min-w-[32px]"></span>

@@ -34,7 +34,7 @@
 - `StatusBar`: Compact running/idle indicator.
 
 ## Persistent storage keys
-- `arena-history`: Array of recent `MatchResult`s for the single-game view (trimmed to 25).
+- `arena-history`: Array of recent `MatchHistoryEntry` objects (result plus player labels) for the single-game view (trimmed to 25).
 - `elo-standings`: Array of `{ model, rating }` snapshots used for Elo charts in single-game and tournament views.
 
 ## Cost and token estimation
