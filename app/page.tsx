@@ -243,8 +243,7 @@ export default function Home() {
   useEffect(() => {
     const updateBoardWidth = () => {
       const containerWidth = boardContainerRef.current?.clientWidth ?? 480;
-      const cap = 600;
-      setBoardWidthPx(Math.min(containerWidth, cap));
+      setBoardWidthPx(containerWidth);
     };
     updateBoardWidth();
     window.addEventListener("resize", updateBoardWidth);
@@ -706,8 +705,8 @@ export default function Home() {
 
             <div className="grid gap-3 lg:grid-cols-[minmax(480px,840px)_minmax(440px,1fr)] items-start">
               <div className="flex flex-col gap-3 items-start w-full">
-                <div className="bg-arena-card rounded-xl p-3 shadow-card transition-all duration-300 overflow-hidden space-y-0 w-full">
-                  <div className="flex items-center justify-between text-sm text-slate-200 px-1">
+                <div className="bg-arena-card rounded-xl p-3 shadow-card transition-all duration-300 overflow-hidden space-y-1 w-full">
+                  <div className="flex items-center justify-between text-sm text-slate-200 px-1 mb-1">
                     <div className="flex items-center gap-2 font-semibold">
                       <span>
                         {blackLabel} | Elo {Math.round(getElo(blackModel))} | Strikes {illegalState.black}/3
@@ -727,8 +726,8 @@ export default function Home() {
                     </div>
                     <span className="text-slate-400">{moves.length ? `Ply ${moves.length}` : ""}</span>
                   </div>
-                  <div ref={boardContainerRef} className="w-full max-w-[660px] mx-auto -mb-6">
-                    <div className="w-full aspect-square">
+                  <div ref={boardContainerRef} className="w-full max-w-[660px] mx-auto">
+                    <div className="w-full">
                       <Chessboard
                         id="ai-chess-arena-board"
                         position={fen}
@@ -736,13 +735,12 @@ export default function Home() {
                         boardWidth={boardWidthPx}
                         animationDuration={300}
                         customBoardStyle={{
-                          boxShadow: "0 10px 25px rgba(0,0,0,0.35)",
-                          marginBottom: "-12px"
+                          boxShadow: "0 10px 25px rgba(0,0,0,0.35)"
                         }}
                       />
                     </div>
                   </div>
-                  <div className="flex items-center justify-between text-sm text-slate-200 px-1 -mt-4">
+                  <div className="flex items-center justify-between text-sm text-slate-200 px-1 mt-1">
                     <div className="flex items-center gap-2 font-semibold">
                       <span>
                         {whiteLabel} | Elo {Math.round(getElo(whiteModel))} | Strikes {illegalState.white}/3
