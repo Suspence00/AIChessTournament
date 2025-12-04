@@ -63,9 +63,6 @@ async function fetchMove(
     const { textStream } = await streamText({
       model: gatewayProvider(model),
       prompt,
-      temperature: 0.35,
-      maxOutputTokens: 8, // keep responses short (UCI + optional promotion)
-      stopSequences: ["\n"], // stop early if model tries to add commentary
       abortSignal: controller.signal
     });
 
@@ -74,7 +71,8 @@ async function fetchMove(
       text += chunk;
     }
     const trimmed = text.trim();
-    if (!trimmed) {
+    const firstToken = trimmed.split(/\s+/)[0] ?? "";
+    if (!firstToken) {
       const reason = `Empty response from model=${model} attempt=${attempt}`;
       log.warn("[Match][fetchMove]", reason);
       if (attempt < 3) {
@@ -85,8 +83,8 @@ async function fetchMove(
       }
       throw new Error("Model returned an empty move");
     }
-    log.info("[Match][fetchMove]", `model=${model} response="${trimmed}"`);
-    return trimmed;
+    log.info("[Match][fetchMove]", `model=${model} response="${firstToken}"`);
+    return firstToken;
   } catch (err: any) {
     const msg = err?.message || "";
     const overloaded =
