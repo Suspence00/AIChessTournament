@@ -706,7 +706,7 @@ export default function Home() {
 
             <div className="grid gap-3 lg:grid-cols-[minmax(480px,840px)_minmax(440px,1fr)] items-start">
               <div className="flex flex-col gap-3 items-start w-full">
-                <div className="bg-arena-card rounded-xl p-3 shadow-card transition-all duration-300 overflow-hidden space-y-2 w-full">
+                <div className="bg-arena-card rounded-xl p-3 shadow-card transition-all duration-300 overflow-hidden space-y-0 w-full">
                   <div className="flex items-center justify-between text-sm text-slate-200 px-1">
                     <div className="flex items-center gap-2 font-semibold">
                       <span>
@@ -727,7 +727,7 @@ export default function Home() {
                     </div>
                     <span className="text-slate-400">{moves.length ? `Ply ${moves.length}` : ""}</span>
                   </div>
-                  <div ref={boardContainerRef} className="w-full max-w-[660px] mx-auto">
+                  <div ref={boardContainerRef} className="w-full max-w-[660px] mx-auto -mb-6">
                     <div className="w-full aspect-square">
                       <Chessboard
                         id="ai-chess-arena-board"
@@ -736,13 +736,13 @@ export default function Home() {
                         boardWidth={boardWidthPx}
                         animationDuration={300}
                         customBoardStyle={{
-                          borderRadius: "12px",
-                          boxShadow: "0 10px 25px rgba(0,0,0,0.35)"
+                          boxShadow: "0 10px 25px rgba(0,0,0,0.35)",
+                          marginBottom: "-12px"
                         }}
                       />
                     </div>
                   </div>
-                  <div className="flex items-center justify-between text-sm text-slate-200 px-1 mt-2">
+                  <div className="flex items-center justify-between text-sm text-slate-200 px-1 -mt-4">
                     <div className="flex items-center gap-2 font-semibold">
                       <span>
                         {whiteLabel} | Elo {Math.round(getElo(whiteModel))} | Strikes {illegalState.white}/3
@@ -810,7 +810,7 @@ export default function Home() {
                   moves={moves}
                   whiteName={whiteLabel}
                   blackName={blackLabel}
-                  latestIllegal={lastIllegalMove}
+                  latestIllegal={lastIllegalMove ?? undefined}
                 />
               </div>
             </div>
@@ -818,20 +818,20 @@ export default function Home() {
 
 
 
-        <div className="grid gap-4 md:grid-cols-2">
-          <div className="glass rounded-xl p-4">
-            <div className="flex items-center justify-between mb-2">
-              <h3 className="text-lg font-semibold">Result & Elo Change</h3>
-              {pgnCopiedLabel && (
-                <span className="text-[11px] rounded-full bg-arena-accent/15 text-arena-accent px-2 py-1">
-                  PGN copied: {pgnCopiedLabel}
-                </span>
-              )}
-            </div>
-            {result ? (
-              <div className="space-y-2 text-sm">
-                <p className="text-xl font-bold">
-                  Winner:{" "}
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="glass rounded-xl p-4">
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="text-lg font-semibold">Result & Elo Change</h3>
+                {pgnCopiedLabel && (
+                  <span className="text-[11px] rounded-full bg-arena-accent/15 text-arena-accent px-2 py-1">
+                    PGN copied: {pgnCopiedLabel}
+                  </span>
+                )}
+              </div>
+              {result ? (
+                <div className="space-y-2 text-sm">
+                  <p className="text-xl font-bold">
+                    Winner:{" "}
                     <span className="text-arena-accent">
                       {result.winner === "draw" ? "Draw" : currentWinnerLabel}
                     </span>
