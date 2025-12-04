@@ -49,3 +49,4 @@
 - Match streams are abortable via `AbortController` (`Stop` button or page unmount). Tournament cards also hold their own controllers for per-match cancellation.
 - Illegal moves: Counts reset after a legal move; chaos mode still increments strikes while executing the move on the board.
 - Timeouts: Bullet games decrement remaining clock by actual model think time; hitting 0 forfeits immediately with a `timeout` result.
+- Live evaluation calls to `chess-api.com` are debounced and can be toggled off to avoid excess network churn; only the latest FEN response updates the bar.

@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import clsx from "clsx";
 import dynamic from "next/dynamic";
+import { Chess } from "chess.js";
 import { modelOptions } from "@/lib/models";
 import { useLocalStorage } from "@/lib/use-local-storage";
 import { MatchClocks, MatchMode, MatchMoveEvent, MatchResult, MatchStreamEvent } from "@/lib/types";
@@ -21,7 +22,7 @@ export default function Home() {
   const [whiteModel, setWhiteModel] = useState(modelOptions[0]?.value ?? "");
   const [blackModel, setBlackModel] = useState(modelOptions[1]?.value ?? "");
   const [mode, setMode] = useState<MatchMode>("strict");
-  const [fen, setFen] = useState<string>("start");
+  const [fen, setFen] = useState<string>(() => new Chess().fen());
   const [moves, setMoves] = useState<MatchMoveEvent[]>([]);
   const [status, setStatus] = useState<string>("Waiting to start");
   const [running, setRunning] = useState(false);
@@ -33,6 +34,7 @@ export default function Home() {
   const [illegalState, setIllegalState] = useState<{ white: number; black: number }>({ white: 0, black: 0 });
   const [evalScore, setEvalScore] = useState<number | null>(null);
   const [evalStatus, setEvalStatus] = useState<string>("Idle");
+  const [evalEnabled, setEvalEnabled] = useState(true);
   const [clockMinutes, setClockMinutes] = useState<number>(3);
   const [clocks, setClocks] = useState<{ white: number; black: number }>({ white: 0, black: 0 });
   const [displayClocks, setDisplayClocks] = useState<{ white: number; black: number }>({ white: 0, black: 0 });
@@ -42,6 +44,9 @@ export default function Home() {
   const boardContainerRef = useRef<HTMLDivElement | null>(null);
   const [boardWidthPx, setBoardWidthPx] = useState(480);
   const audioCtxRef = useRef<AudioContext | null>(null);
+  const evalDebounceRef = useRef<number | null>(null);
+  const evalControllerRef = useRef<AbortController | null>(null);
+  const evalRequestIdRef = useRef(0);
   const activeColorFromFen = () => (fen.split(" ")[1] === "w" ? "white" : "black");
   const activeColor = activeColorFromFen();
   const bulletInitialMs = Math.min(3, Math.max(1, clockMinutes)) * 60_000;
@@ -51,15 +56,10 @@ export default function Home() {
     const seconds = totalSeconds % 60;
     return `${minutes}:${seconds.toString().padStart(2, "0")}`;
   };
-  const perMoveTokens = estimateTokens(moves, fen, activeColor, mode, mode === "bullet" ? {
+  const estimatedTokens = estimateTokens(moves, fen, activeColor, mode, mode === "bullet" ? {
     clockMsRemaining: clocks[activeColor],
     initialClockMs: bulletInitialMs
   } : undefined);
-  const expectedPlies = Math.max(80, moves.length + 10); // rough full-game projection
-  const estimatedTokens = {
-    input: perMoveTokens.input * expectedPlies,
-    output: perMoveTokens.output * expectedPlies
-  };
   const whiteModelMeta = modelOptions.find((m) => m.value === whiteModel);
   const blackModelMeta = modelOptions.find((m) => m.value === blackModel);
   const estCostWhite = estimateCost(whiteModelMeta, estimatedTokens.input, estimatedTokens.output);
@@ -89,16 +89,22 @@ export default function Home() {
     }
   };
 
-  const evaluatePosition = async (fenToEval: string) => {
+  const runEval = async (fenToEval: string) => {
+    const requestId = ++evalRequestIdRef.current;
+    evalControllerRef.current?.abort();
+    const controller = new AbortController();
+    evalControllerRef.current = controller;
     setEvalStatus("Evaluating...");
     try {
       const res = await fetch("https://chess-api.com/v1", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ fen: fenToEval, depth: 12 })
+        body: JSON.stringify({ fen: fenToEval, depth: 12 }),
+        signal: controller.signal
       });
       if (!res.ok) throw new Error(`Eval failed (${res.status})`);
       const data = await res.json();
+      if (requestId !== evalRequestIdRef.current) return;
       if (typeof data.eval === "number") {
         setEvalScore(data.eval);
         setEvalStatus(data.text || "OK");
@@ -111,8 +117,23 @@ export default function Home() {
         setEvalStatus("No eval");
       }
     } catch (err: any) {
+      if (controller.signal.aborted || requestId !== evalRequestIdRef.current) return;
+      setEvalScore(null);
       setEvalStatus(err?.message || "Eval error");
     }
+  };
+
+  const queueEvaluation = (fenToEval: string) => {
+    if (!evalEnabled) {
+      setEvalStatus("Eval disabled");
+      return;
+    }
+    if (evalDebounceRef.current) {
+      window.clearTimeout(evalDebounceRef.current);
+    }
+    evalDebounceRef.current = window.setTimeout(() => {
+      runEval(fenToEval);
+    }, 350);
   };
 
   useEffect(() => {
@@ -171,6 +192,15 @@ export default function Home() {
     setEloChart(baseline);
   }, []);
 
+  useEffect(() => {
+    return () => {
+      evalControllerRef.current?.abort();
+      if (evalDebounceRef.current) {
+        window.clearTimeout(evalDebounceRef.current);
+      }
+    };
+  }, []);
+
   const syncClocksFromEvent = (incoming?: MatchClocks, nextTurn?: "white" | "black" | null) => {
     if (mode !== "bullet" || !incoming) return;
     setClocks({ white: incoming.whiteMs, black: incoming.blackMs });
@@ -204,7 +234,7 @@ export default function Home() {
       syncClocksFromEvent(event.clocks, nextTurn);
       const isCapture = event.san?.includes("x");
       playSound(isCapture ? "capture" : "move");
-      evaluatePosition(event.fen);
+      queueEvaluation(event.fen);
       return;
     }
 
@@ -218,7 +248,7 @@ export default function Home() {
       setStatus(`Winner: ${event.result.winner} via ${event.result.reason}`);
       playSound("gameover");
       setIllegalState(event.result.illegalCounts);
-      evaluatePosition(event.result.finalFen);
+      queueEvaluation(event.result.finalFen);
 
       // Elo update and delta
       const applyElo = (elo: Array<{ model: string; rating: number }>, whiteId: string, blackId: string, result: MatchResult) => {
@@ -264,7 +294,8 @@ export default function Home() {
     setStatus("Launching bots via Vercel AI Gateway...");
     setMoves([]);
     setResult(null);
-    setFen("start");
+    const startFen = new Chess().fen();
+    setFen(startFen);
     if (mode === "bullet") {
       setClocks({ white: bulletInitialMs, black: bulletInitialMs });
       setDisplayClocks({ white: bulletInitialMs, black: bulletInitialMs });
@@ -523,6 +554,26 @@ export default function Home() {
                     </div>
                   </div>
                   <div className="pt-2">
+                    <div className="flex items-center justify-between text-xs text-slate-400 mb-1 px-1">
+                      <span>Live evaluation</span>
+                      <label className="flex items-center gap-1 cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          className="accent-arena-accent"
+                          checked={evalEnabled}
+                          onChange={(e) => {
+                            setEvalEnabled(e.target.checked);
+                            if (!e.target.checked) {
+                              evalControllerRef.current?.abort();
+                              setEvalStatus("Eval disabled");
+                            } else {
+                              queueEvaluation(fen);
+                            }
+                          }}
+                        />
+                        <span>Enabled</span>
+                      </label>
+                    </div>
                     <EvalBar orientation="horizontal" evalScore={evalScore} status={evalStatus} />
                   </div>
                 </div>

@@ -1,5 +1,5 @@
+import { useMemo } from "react";
 import { ArenaModelOption } from "@/lib/types";
-import { getGroupedModels } from "@/lib/models";
 
 interface Props {
   label: string;
@@ -9,7 +9,15 @@ interface Props {
 }
 
 export function ModelSelect({ label, value, onChange, options }: Props) {
-  const grouped = getGroupedModels();
+  const grouped = useMemo(() => {
+    const groups: Record<string, ArenaModelOption[]> = {};
+    options.forEach((model) => {
+      const provider = model.provider || "Other";
+      if (!groups[provider]) groups[provider] = [];
+      groups[provider].push(model);
+    });
+    return groups;
+  }, [options]);
 
   return (
     <label className="flex flex-col gap-2 text-sm w-full">

@@ -36,7 +36,8 @@ Models are passed as `provider/model` (e.g., `openai/gpt-4.1`, `anthropic/claude
 - `lib/types.ts` — Shared types for stream events and results.
 
 ### Notes
-- Strict mode: illegal moves are rejected and 5 strikes forfeits.  
+- Strict mode: illegal moves are rejected and 3 strikes forfeits.  
 - Chaos mode: illegal moves are executed anyway (teleports) and still tracked.  
+- Bullet mode: same 3-strike rule with 1-3 minute clocks; flagging on time forfeits immediately.  
 - Streaming protocol: NDJSON over `text/event-stream` (one JSON object per line).
 - Tournament mode: pick up to 8 models; the server plays a single round-robin (color alternates by pairing) and returns ranked standings (win=1, draw=0.5).
