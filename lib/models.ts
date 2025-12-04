@@ -27,6 +27,9 @@ export const modelOptions: ArenaModelOption[] = [
   { label: "GPT-4o Mini", value: "openai/gpt-4o-mini", provider: "OpenAI", context: "128K", inputCostPerMTokens: 0.15, outputCostPerMTokens: 0.60, cacheReadCostPerMTokens: 0.07 },
   { label: "GPT-4.1 Mini", value: "openai/gpt-4.1-mini", provider: "OpenAI", context: "1M", inputCostPerMTokens: 0.40, outputCostPerMTokens: 1.60, cacheReadCostPerMTokens: 0.10 },
 
+  // Meituan
+  { label: "Longcat Flash Chat", value: "meituan/longcat-flash-chat", provider: "Meituan", context: "128K" },
+
   // Meta
   { label: "Llama 3.1 8B", value: "meta/llama-3.1-8b", provider: "Meta", context: "128K", inputCostPerMTokens: 0.05, outputCostPerMTokens: 0.08 }
 ];

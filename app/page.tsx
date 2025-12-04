@@ -369,12 +369,22 @@ export default function Home() {
   return (
     <main className="min-h-screen bg-arena-bg bg-[radial-gradient(circle_at_20%_10%,rgba(77,208,225,0.06),transparent_25%),radial-gradient(circle_at_80%_0%,rgba(167,139,250,0.08),transparent_22%)]">
       <div className="mx-auto flex max-w-7xl flex-col gap-6 px-4 py-10">
-        <header className="flex flex-col gap-2">
-          <p className="text-xs uppercase tracking-[0.3em] text-arena-accent">Vercel AI Hackathon</p>
-          <h1 className="text-4xl md:text-5xl font-extrabold">AI Chess Arena</h1>
-          <p className="text-slate-300 max-w-3xl">
-            Two AI models, one board. Pick your models via the Vercel AI Gateway, start the match, and watch the moves stream live with automatic validation.
-          </p>
+        <header className="flex flex-col gap-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex flex-col gap-2">
+              <p className="text-xs uppercase tracking-[0.3em] text-arena-accent">Vercel AI Hackathon</p>
+              <h1 className="text-4xl md:text-5xl font-extrabold">AI Chess Arena</h1>
+              <p className="text-slate-300 max-w-3xl">
+                Two AI models, one board. Pick your models via the Vercel AI Gateway, start the match, and watch the moves stream live with automatic validation.
+              </p>
+            </div>
+            <a
+              href="/tournament"
+              className="rounded-lg bg-arena-accent px-5 py-2.5 text-sm font-semibold text-black shadow-lg hover:bg-cyan-300 transition"
+            >
+              Tournament Mode
+            </a>
+          </div>
           <StatusBar status={status} running={running} />
         </header>
 
@@ -597,9 +607,6 @@ export default function Home() {
             <div className="glass rounded-xl p-4 space-y-3">
               <div className="flex items-center justify-between">
                 <h3 className="text-lg font-semibold">Token & Cost Estimate</h3>
-                <a href="/tournament" className="text-xs text-arena-accent hover:underline">
-                  Go to Tournament
-                </a>
               </div>
               <div className="text-sm text-slate-300 space-y-2">
                 <div className="flex justify-between">
@@ -627,7 +634,7 @@ export default function Home() {
                   </span>
                 </div>
                 <p className="text-[11px] text-slate-500">
-                  Estimates use a rough token heuristic; actual usage depends on model responses.
+                  Estimate uses a mid/late-game average; real costs still depend on verbosity, retries, and early resigns.
                 </p>
               </div>
             </div>
