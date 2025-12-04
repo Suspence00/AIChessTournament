@@ -17,14 +17,11 @@ export const maxDuration = 120;
 export const dynamic = "force-dynamic";
 
 const MAX_PLY = 300;
-const gatewayKey =
-  process.env.AI_GATEWAY_API_KEY ||
-  process.env.AI_GATEWAY_TOKEN ||
-  process.env.OPENAI_API_KEY;
-
-if (!gatewayKey) {
-  throw new Error(
-    "Missing AI key. Set AI_GATEWAY_API_KEY (preferred) or AI_GATEWAY_TOKEN or OPENAI_API_KEY."
+function getGatewayKey() {
+  return (
+    process.env.AI_GATEWAY_API_KEY ||
+    process.env.AI_GATEWAY_TOKEN ||
+    process.env.OPENAI_API_KEY
   );
 }
 
@@ -392,6 +389,7 @@ function buildStandings(
 }
 
 export async function POST(req: NextRequest) {
+  const gatewayKey = getGatewayKey();
   if (!gatewayKey) {
     return new Response(
       "Server missing AI key. Set AI_GATEWAY_API_KEY (preferred) or AI_GATEWAY_TOKEN or OPENAI_API_KEY and restart.",
