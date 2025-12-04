@@ -159,10 +159,11 @@ export default function Home() {
     clockMsRemaining: clocks[activeColor],
     initialClockMs: bulletInitialMs
   } : undefined);
+  const estimatedTotalTokens = estimatedTokens.total.input + estimatedTokens.total.output;
   const whiteModelMeta = modelOptions.find((m) => m.value === whiteModel);
   const blackModelMeta = modelOptions.find((m) => m.value === blackModel);
-  const estCostWhite = estimateCost(whiteModelMeta, estimatedTokens.input, estimatedTokens.output);
-  const estCostBlack = estimateCost(blackModelMeta, estimatedTokens.input, estimatedTokens.output);
+  const estCostWhite = estimateCost(whiteModelMeta, estimatedTokens.perSide.input, estimatedTokens.perSide.output);
+  const estCostBlack = estimateCost(blackModelMeta, estimatedTokens.perSide.input, estimatedTokens.perSide.output);
   const getElo = (modelValue: string) => {
     return eloChart.find((e) => e.model === modelValue)?.rating ?? 1000;
   };
@@ -880,7 +881,13 @@ export default function Home() {
                 <div className="flex justify-between">
                   <span>Estimated tokens (full game)</span>
                   <span className="font-mono text-white">
-                    ~{estimatedTokens.input + estimatedTokens.output} (in {estimatedTokens.input} / out {estimatedTokens.output})
+                    ~{estimatedTotalTokens} (in {estimatedTokens.total.input} / out {estimatedTokens.total.output})
+                  </span>
+                </div>
+                <div className="flex justify-between text-xs text-slate-400">
+                  <span>Per side (used for costs)</span>
+                  <span className="font-mono text-white">
+                    in {estimatedTokens.perSide.input} / out {estimatedTokens.perSide.output}
                   </span>
                 </div>
                 <div className="flex justify-between">

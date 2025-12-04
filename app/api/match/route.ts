@@ -19,6 +19,22 @@ export const dynamic = "force-dynamic";
 const encoder = new TextEncoder();
 const MAX_PLY = 400;
 
+const ANSI = {
+  reset: "\x1b[0m",
+  cyan: "\x1b[36m",
+  yellow: "\x1b[33m",
+  red: "\x1b[31m",
+  magenta: "\x1b[35m"
+} as const;
+
+const log = {
+  info: (scope: string, message: string) => console.log(`${ANSI.cyan}${scope}${ANSI.reset} ${message}`),
+  warn: (scope: string, message: string) => console.warn(`${ANSI.yellow}${scope}${ANSI.reset} ${message}`),
+  error: (scope: string, message: string, err?: unknown) =>
+    err ? console.error(`${ANSI.red}${scope}${ANSI.reset} ${message}`, err) : console.error(`${ANSI.red}${scope}${ANSI.reset} ${message}`),
+  debug: (scope: string, message: string) => console.log(`${ANSI.magenta}${scope}${ANSI.reset} ${message}`)
+};
+
 function getGatewayKey(override?: string) {
   const fromRequest = override?.trim();
   if (fromRequest) return fromRequest;
@@ -42,12 +58,14 @@ async function fetchMove(
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
-    console.log(`[fetchMove] Calling model: ${model}`);
-    console.log(`[fetchMove] Prompt:\n${prompt}`);
+    log.info("[Match][fetchMove]", `model=${model} attempt=${attempt} timeout=${timeoutMs}ms`);
+    log.debug("[Match][fetchMove]", `prompt (full):\n${prompt}`);
     const { textStream } = await streamText({
       model: gatewayProvider(model),
       prompt,
-      temperature: 0.7,
+      temperature: 0.35,
+      maxOutputTokens: 8, // keep responses short (UCI + optional promotion)
+      stopSequences: [" ", "\n"], // stop early if model tries to add commentary
       abortSignal: controller.signal
     });
 
@@ -56,7 +74,18 @@ async function fetchMove(
       text += chunk;
     }
     const trimmed = text.trim();
-    console.log(`[fetchMove] Model ${model} returned: "${trimmed}"`);
+    if (!trimmed) {
+      const reason = `Empty response from model=${model} attempt=${attempt}`;
+      log.warn("[Match][fetchMove]", reason);
+      if (attempt < 3) {
+        const backoff = 800 * attempt + 400;
+        log.warn("[Match][fetchMove]", `Retrying after empty response in ${backoff}ms`);
+        await sleep(backoff);
+        return fetchMove(model, gatewayProvider, prompt, timeoutMs, attempt + 1);
+      }
+      throw new Error("Model returned an empty move");
+    }
+    log.info("[Match][fetchMove]", `model=${model} response="${trimmed}"`);
     return trimmed;
   } catch (err: any) {
     const msg = err?.message || "";
@@ -66,7 +95,7 @@ async function fetchMove(
       err?.name === "AI_TypeValidationError";
     if (overloaded && attempt < 3) {
       const backoff = 1000 * attempt + 500;
-      console.warn(`[fetchMove] Overload detected, retrying in ${backoff}ms (attempt ${attempt + 1})`);
+      log.warn("[Match][fetchMove]", `Overload detected, retrying in ${backoff}ms (attempt ${attempt + 1})`);
       await sleep(backoff);
       return fetchMove(model, gatewayProvider, prompt, timeoutMs, attempt + 1);
     }
@@ -180,16 +209,80 @@ export async function POST(req: NextRequest) {
 
         let rawMove = "";
         const moveStartTime = Date.now();
+        let fetchErr: any = null;
         try {
           const perMoveTimeout = isBullet
             ? Math.max(500, Math.min(MOVE_TIMEOUT_MS, clocks[activeColor] || MOVE_TIMEOUT_MS))
             : MOVE_TIMEOUT_MS;
           rawMove = await fetchMove(activeModel, gatewayProvider, prompt, perMoveTimeout);
         } catch (err: any) {
-          console.error("Model call failed:", err);
+          fetchErr = err;
+        }
+        const moveTime = Date.now() - moveStartTime;
+
+        if (fetchErr) {
+          if (isBullet) {
+            clocks[activeColor] = Math.max(0, clocks[activeColor] - moveTime);
+            if (clocks[activeColor] <= 0) {
+              const clockSnapshot = { whiteMs: clocks.white, blackMs: clocks.black };
+              const result = buildResult(opponent, "timeout", moves, illegalCounts, chess, clockSnapshot);
+              send(controller, {
+                type: "status",
+                message: `${activeColor} flagged on time (${moveTime}ms used)`,
+                illegalCounts,
+                clocks: clockSnapshot
+              });
+              send(controller, { type: "end", result });
+              controller.close();
+              return;
+            }
+          }
+
+          const message = fetchErr instanceof Error ? fetchErr.message : String(fetchErr);
+          const emptyMove = message?.toLowerCase().includes("empty move");
+
+          if (emptyMove) {
+            illegalCounts[activeColor] += 1;
+            const reason = "Model returned an empty move";
+            lastIllegal[activeColor] = { moveText: "(empty)", reason };
+            lastIllegalMoves[activeColor] = {
+              by: activeColor,
+              move: "(empty)",
+              reason,
+              strikes: illegalCounts[activeColor],
+              ply
+            };
+
+            log.warn("[Match][fetchMove-empty]", `ply=${ply} color=${activeColor} strikes=${illegalCounts[activeColor]} msg="${message}"`);
+
+            send(controller, {
+              type: "status",
+              message: `${activeColor} produced an empty move (${illegalCounts[activeColor]} strikes)`,
+              illegalCounts,
+              clocks: isBullet ? { whiteMs: clocks.white, blackMs: clocks.black } : undefined,
+              illegalMove: lastIllegalMoves[activeColor]
+            });
+
+            if ((mode === "strict" || mode === "bullet") && illegalCounts[activeColor] >= 3) {
+              const result = buildResult(
+                opponent,
+                "illegal",
+                moves,
+                illegalCounts,
+                chess,
+                isBullet ? { whiteMs: clocks.white, blackMs: clocks.black } : undefined,
+                lastIllegalMoves
+              );
+              send(controller, { type: "end", result });
+              controller.close();
+              return;
+            }
+
+            continue;
+          }
+
+          log.error("[Match][error]", "Model call failed:", fetchErr);
           const winner = activeColor === "white" ? "black" : "white";
-          const message =
-            err instanceof Error ? err.message : "Model call failed or timed out";
           const result = buildResult(
             winner,
             "timeout",
@@ -199,12 +292,12 @@ export async function POST(req: NextRequest) {
             isBullet ? { whiteMs: clocks.white, blackMs: clocks.black } : undefined,
             lastIllegalMoves
           );
-          send(controller, { type: "status", message: `${activeColor} error: ${message}` });
+          send(controller, { type: "status", message: `${activeColor} error: ${message || "Model call failed or timed out"}` });
           send(controller, { type: "end", result });
           controller.close();
           return;
         }
-        const moveTime = Date.now() - moveStartTime;
+
         if (isBullet) {
           clocks[activeColor] = Math.max(0, clocks[activeColor] - moveTime);
           if (clocks[activeColor] <= 0) {
@@ -252,29 +345,31 @@ export async function POST(req: NextRequest) {
 
         let moveResult = null;
         try {
-          moveResult = chess.move(rawTrimmed, { sloppy: true } as any);
-        } catch (err: any) {
-          console.log(
-            `[Match] Chess.js threw error for raw move "${rawTrimmed}": ${err.message}`
-          );
-          moveResult = null;
-        }
-        console.log(
-          `[Match] Raw: "${rawMove}" -> Cleaned: "${cleaned}" -> MoveResult: ${
-            moveResult
-              ? JSON.stringify({
-                  from: moveResult.from,
-                  to: moveResult.to,
-                  promotion: moveResult.promotion,
-                  san: moveResult.san
-                })
-              : "null"
-          }`
-        );
+      moveResult = chess.move(rawTrimmed, { sloppy: true } as any);
+    } catch (err: any) {
+      log.warn(
+        "[Match][legal-check]",
+        `ply=${ply} color=${activeColor} raw="${rawTrimmed}" error="${err?.message ?? err}"`
+      );
+      moveResult = null;
+    }
+    log.info(
+      "[Match][move-parse]",
+      `ply=${ply} color=${activeColor} raw="${rawMove}" cleaned="${cleaned}" result=${
+        moveResult
+          ? JSON.stringify({
+              from: moveResult.from,
+              to: moveResult.to,
+              promotion: moveResult.promotion,
+              san: moveResult.san
+            })
+          : "null"
+      }`
+    );
 
-        if (!moveResult) {
-          illegalCounts[activeColor] += 1;
-          const parsedUci = parseUciMove(cleaned);
+    if (!moveResult) {
+      illegalCounts[activeColor] += 1;
+      const parsedUci = parseUciMove(cleaned);
 
           let reason = "Illegal move in current position";
           if (parsedUci) {
@@ -297,9 +392,10 @@ export async function POST(req: NextRequest) {
             reason = "Could not parse move text";
           }
 
-          console.log(
-            `[Match] Chess.js rejected move "${rawTrimmed}" for ${activeColor} (${reason})`
-          );
+      log.warn(
+        "[Match][illegal]",
+        `ply=${ply} color=${activeColor} raw="${rawTrimmed}" reason="${reason}"`
+      );
 
           lastIllegal[activeColor] = { moveText: rawTrimmed, reason };
           lastIllegalMoves[activeColor] = {
@@ -324,7 +420,32 @@ export async function POST(req: NextRequest) {
             if (parsedChaos) {
               const chaos = applyChaosMove(fen, parsedChaos, chess.turn(), fullmove);
               fen = chaos.fen;
-              chess = new Chess(fen);
+              try {
+                chess = new Chess(fen);
+              } catch (err: any) {
+                log.error(
+                  "[Match][chaos-invalid-fen]",
+                  `ply=${ply} color=${activeColor} fen="${fen}" error="${err?.message ?? err}"`
+                );
+                const result = buildResult(
+                  opponent,
+                  "illegal",
+                  moves,
+                  illegalCounts,
+                  chess,
+                  isBullet ? { whiteMs: clocks.white, blackMs: clocks.black } : undefined,
+                  lastIllegalMoves
+                );
+                send(controller, {
+                  type: "status",
+                  message: `Chaos move produced invalid board: ${err?.message ?? "invalid FEN"}`,
+                  illegalCounts,
+                  clocks: isBullet ? { whiteMs: clocks.white, blackMs: clocks.black } : undefined
+                });
+                send(controller, { type: "end", result });
+                controller.close();
+                return;
+              }
               fullmove = parseInt(fen.split(" ")[5], 10) || fullmove;
               moves.push(chaos.san);
 

@@ -12,16 +12,17 @@ interface PromptInput {
   };
 }
 
+const HISTORY_CAP = 24; // limit history text to keep prompts small
+
 export function buildModelPrompt({ fen, history, activeColor, mode, lastMove, clockMsRemaining, initialClockMs }: PromptInput) {
+  const historyTail = history.slice(-HISTORY_CAP);
+  const trimmedCount = history.length - historyTail.length;
   const colorText = activeColor === "white" ? "White" : "Black";
   const isChaos = mode === "chaos";
   const isBullet = mode === "bullet";
   const legality = isChaos
-    ? "Illegal moves will be executed anyway, but still prefer a strong legal move."
-    : "Only return a legal chess move that obeys the rules.";
-  const illegalNote = isChaos
-    ? "Illegal moves will still be played (chaos mode), but you should avoid them."
-    : "If you repeat illegal moves you will forfeit after 3 strikes.";
+    ? "Chaos: illegal moves still execute, but they still count as strikes."
+    : "Strict: only legal chess moves; 3 strikes forfeits.";
 
   const lastMoveLine =
     (lastMove?.wasIllegal)
@@ -39,11 +40,10 @@ export function buildModelPrompt({ fen, history, activeColor, mode, lastMove, cl
   return [
     `You are playing ${colorText} in a chess game.`,
     `Board (FEN): ${fen}`,
-    `Previous moves (UCI): ${history.length ? history.join(", ") : "none"}`,
+    `Previous moves (last ${historyTail.length}${trimmedCount > 0 ? ` of ${history.length}` : ""}): ${historyTail.length ? historyTail.join(" ") : "none"}`,
     lastMoveLine,
     clockLine,
     legality,
-    illegalNote,
     speedLine,
     "If you want to resign, respond with: resign",
     "Do not include any commentary or code blocks. Output a single token with no quotes."

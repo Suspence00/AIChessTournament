@@ -1,9 +1,15 @@
 import { ArenaModelOption, MatchMode, MatchMoveEvent } from "./types";
 import { buildModelPrompt } from "./prompt";
 
-// rough heuristic: tokens ~= chars/4
+export type TokenEstimate = {
+  total: { input: number; output: number };
+  perSide: { input: number; output: number };
+  perCall: { input: number; output: number };
+};
+
+// conservative heuristic: chess prompts tokenize densely, closer to ~chars/2
 export function charsToTokens(chars: number) {
-  return Math.ceil(chars / 4);
+  return Math.ceil(chars / 2);
 }
 
 export function estimateTokens(
@@ -58,15 +64,23 @@ export function estimateTokens(
       charsToTokens(promptLate.length)) /
     3;
 
-  const gatewayOverhead = 256; // smaller but non-zero buffer for system/routing text
-  const perCallInput = avgPromptTokens + gatewayOverhead;
-  const perCallOutput = 32; // UCI with a small safety margin
+  const gatewayOverhead = 350; // buffer for system/routing text and metadata
+  const perCallInput = Math.ceil(avgPromptTokens + gatewayOverhead);
+  const perCallOutput = 8; // UCI with promotion plus tiny margin
 
-  const safety = 1.2; // modest cushion
-  const input = Math.ceil(perCallInput * projectedPlies * safety);
-  const output = Math.ceil(perCallOutput * projectedPlies * safety);
+  const safety = 1.4; // cushion for formatting variance
+  const retryPadding = 1.1; // account for occasional retries/timeouts
+  const totalInput = Math.ceil(perCallInput * projectedPlies * safety * retryPadding);
+  const totalOutput = Math.ceil(perCallOutput * projectedPlies * safety * retryPadding);
 
-  return { input, output };
+  const perSideInput = Math.ceil(totalInput / 2);
+  const perSideOutput = Math.ceil(totalOutput / 2);
+
+  return {
+    total: { input: totalInput, output: totalOutput },
+    perSide: { input: perSideInput, output: perSideOutput },
+    perCall: { input: perCallInput, output: perCallOutput }
+  };
 }
 
 export function estimateCost(model: ArenaModelOption | undefined, inputTokens: number, outputTokens: number) {

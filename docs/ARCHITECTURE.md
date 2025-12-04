@@ -38,7 +38,8 @@
 - `elo-standings`: Array of `{ model, rating }` snapshots used for Elo charts in single-game and tournament views.
 
 ## Cost and token estimation
-- `lib/costs.estimateTokens` builds synthetic mid/late-game prompts to approximate per-game input/output token totals (heuristic, not model-aware).
+- `lib/prompt.ts` trims prompt history to the last ~24 plies to keep per-move prompts compact while the FEN carries full state.
+- `lib/costs.estimateTokens` builds synthetic mid/late-game prompts to approximate per-game input/output token totals (heuristic, not model-aware), using a denser chars→tokens ratio, retry padding, and per-side breakdown for cost display.
 - `lib/costs.estimateCost` multiplies estimated tokens by the per-million rates from `lib/models.ts` and surfaces per-side and combined totals in the UI.
 
 ## External services

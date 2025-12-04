@@ -18,6 +18,12 @@ function formatTime(ms: number | undefined): string {
 }
 
 export function MoveLog({ moves, whiteName = "White", blackName = "Black", latestIllegal }: Props) {
+  const legalMoves = moves.filter((move) => {
+    const note = move.note?.toLowerCase() ?? "";
+    const san = move.san?.toLowerCase() ?? "";
+    return !note.includes("illegal") && !san.startsWith("?");
+  });
+
   // Group moves by move number (pair white and black)
   const groupedMoves: Array<{ white?: MatchMoveEvent; black?: MatchMoveEvent; moveNum: number }> = [];
   const isIllegal = (move?: MatchMoveEvent) =>
@@ -26,7 +32,7 @@ export function MoveLog({ moves, whiteName = "White", blackName = "Black", lates
       (move.san?.startsWith("?") ?? false) ||
       (move.san?.startsWith("❌") ?? false));
 
-  moves.forEach(move => {
+  legalMoves.forEach(move => {
     const moveNum = move.displayMoveNum ?? Math.floor(move.ply / 2) + 1;
     let group = groupedMoves.find(g => g.moveNum === moveNum);
 
@@ -46,7 +52,7 @@ export function MoveLog({ moves, whiteName = "White", blackName = "Black", lates
     <div className="glass rounded-xl p-4 max-h-[420px] overflow-auto">
       <div className="flex items-center justify-between mb-2">
         <h3 className="text-lg font-semibold">Live Moves</h3>
-        <span className="text-xs text-slate-400">{moves.length} plies</span>
+        <span className="text-xs text-slate-400">{legalMoves.length} plies</span>
       </div>
 
       {latestIllegal && (
@@ -137,7 +143,7 @@ export function MoveLog({ moves, whiteName = "White", blackName = "Black", lates
           </div>
         ))}
 
-        {moves.length === 0 && (
+        {legalMoves.length === 0 && (
           <div className="text-slate-400 text-sm py-2">Moves will stream in once the match starts.</div>
         )}
       </div>
