@@ -12,17 +12,16 @@ import {
   TournamentStanding,
   MatchClocks
 } from "@/lib/types";
+import { createGateway } from "@ai-sdk/gateway";
 
 export const maxDuration = 120;
 export const dynamic = "force-dynamic";
 
 const MAX_PLY = 300;
-function getGatewayKey() {
-  return (
-    process.env.AI_GATEWAY_API_KEY ||
-    process.env.AI_GATEWAY_TOKEN ||
-    process.env.OPENAI_API_KEY
-  );
+function getGatewayKey(override?: string) {
+  const fromRequest = override?.trim();
+  if (fromRequest) return fromRequest;
+  return process.env.AI_GATEWAY_API_KEY || process.env.AI_GATEWAY_TOKEN || process.env.OPENAI_API_KEY;
 }
 
 const MOVE_TIMEOUT_MS = parseInt(process.env.MOVE_TIMEOUT_MS ?? "12000", 10);
@@ -31,13 +30,19 @@ function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function fetchMove(model: string, prompt: string, timeoutMs = MOVE_TIMEOUT_MS, attempt = 1) {
+async function fetchMove(
+  model: string,
+  gatewayProvider: ReturnType<typeof createGateway>,
+  prompt: string,
+  timeoutMs = MOVE_TIMEOUT_MS,
+  attempt = 1
+) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
     const { textStream } = await streamText({
-      model,
+      model: gatewayProvider(model),
       prompt,
       temperature: 0.7,
       abortSignal: controller.signal
@@ -58,7 +63,7 @@ async function fetchMove(model: string, prompt: string, timeoutMs = MOVE_TIMEOUT
       const backoff = 1000 * attempt + 500;
       console.warn(`[fetchMove] Overload detected, retrying in ${backoff}ms (attempt ${attempt + 1})`);
       await sleep(backoff);
-      return fetchMove(model, prompt, timeoutMs, attempt + 1);
+      return fetchMove(model, gatewayProvider, prompt, timeoutMs, attempt + 1);
     }
     throw err;
   } finally {
@@ -100,6 +105,7 @@ async function playMatch(
   whiteModel: string,
   blackModel: string,
   mode: MatchMode,
+  gatewayProvider: ReturnType<typeof createGateway>,
   clockMinutes?: number
 ): Promise<MatchResult> {
   let fen = new Chess().fen();
@@ -143,7 +149,7 @@ async function playMatch(
       const perMoveTimeout = isBullet
         ? Math.max(500, Math.min(MOVE_TIMEOUT_MS, clocks[activeColor] || MOVE_TIMEOUT_MS))
         : MOVE_TIMEOUT_MS;
-      rawMove = await fetchMove(activeModel, prompt, perMoveTimeout);
+      rawMove = await fetchMove(activeModel, gatewayProvider, prompt, perMoveTimeout);
     } catch (err: any) {
       console.error("Model call failed:", err);
       const winner = activeColor === "white" ? "black" : "white";
@@ -389,14 +395,6 @@ function buildStandings(
 }
 
 export async function POST(req: NextRequest) {
-  const gatewayKey = getGatewayKey();
-  if (!gatewayKey) {
-    return new Response(
-      "Server missing AI key. Set AI_GATEWAY_API_KEY (preferred) or AI_GATEWAY_TOKEN or OPENAI_API_KEY and restart.",
-      { status: 500 }
-    );
-  }
-
   let body: TournamentRequest;
   try {
     body = await req.json();
@@ -404,7 +402,15 @@ export async function POST(req: NextRequest) {
     return new Response("Invalid JSON", { status: 400 });
   }
 
-  const { models, mode, clockMinutes } = body;
+  const { models, mode, clockMinutes, apiKey: apiKeyFromBody } = body;
+  const gatewayKey = getGatewayKey(apiKeyFromBody);
+  if (!gatewayKey) {
+    return new Response(
+      "Missing AI key. Provide apiKey in the request body or set AI_GATEWAY_API_KEY (preferred) / AI_GATEWAY_TOKEN / OPENAI_API_KEY.",
+      { status: 401 }
+    );
+  }
+  const gatewayProvider = createGateway({ apiKey: gatewayKey });
   if (!Array.isArray(models) || models.length < 2) {
     return new Response("Provide at least two models", { status: 400 });
   }
@@ -420,7 +426,7 @@ export async function POST(req: NextRequest) {
     for (let j = i + 1; j < models.length; j++) {
       const asWhite = (i + j) % 2 === 0 ? models[i] : models[j];
       const asBlack = asWhite === models[i] ? models[j] : models[i];
-      const result = await playMatch(asWhite, asBlack, mode, clockMinutes);
+      const result = await playMatch(asWhite, asBlack, mode, gatewayProvider, clockMinutes);
       matches.push({ white: asWhite, black: asBlack, result });
       updateRatings(ratings, asWhite, asBlack, result);
     }

@@ -5,6 +5,7 @@ import dynamic from "next/dynamic";
 import clsx from "clsx";
 import { getGroupedModels } from "@/lib/models";
 import { MatchMode, MatchMoveEvent, MatchResult } from "@/lib/types";
+import { useLocalStorage } from "@/lib/use-local-storage";
 
 const Chessboard = dynamic(() => import("react-chessboard").then((mod) => mod.Chessboard), {
   ssr: false
@@ -71,6 +72,7 @@ export default function TournamentPage() {
   const [mode, setMode] = useState<MatchMode>("strict");
   const [clockMinutes, setClockMinutes] = useState(3);
   const [selected, setSelected] = useState<string[]>([]);
+  const [apiKey, setApiKey] = useLocalStorage<string>("arena-api-key", "");
   const [matches, setMatches] = useState<MatchCardState[]>([]);
   const [tStatus, setTStatus] = useState("Pick players and start the arena.");
   const [busy, setBusy] = useState(false);
@@ -124,7 +126,13 @@ export default function TournamentPage() {
     }
   }, []);
 
-  const runMatch = async (cardId: string, white: string, black: string, mode: MatchMode) => {
+  const runMatch = async (
+    cardId: string,
+    white: string,
+    black: string,
+    mode: MatchMode,
+    apiKeyForMatch: string
+  ) => {
     const controller = new AbortController();
     const bulletMinutes = Math.min(3, Math.max(1, clockMinutes));
     setMatches((prev) =>
@@ -147,7 +155,8 @@ export default function TournamentPage() {
           whiteModel: white,
           blackModel: black,
           mode,
-          clockMinutes: mode === "bullet" ? bulletMinutes : undefined
+          clockMinutes: mode === "bullet" ? bulletMinutes : undefined,
+          apiKey: apiKeyForMatch
         }),
         headers: { "Content-Type": "application/json" },
         signal: controller.signal
@@ -254,6 +263,11 @@ export default function TournamentPage() {
       setTStatus("Pick at least two players.");
       return;
     }
+    const key = apiKey.trim();
+    if (!key) {
+      setTStatus("Add your Vercel AI Gateway API key to start the tournament.");
+      return;
+    }
     const pairings = buildPairings(selected);
     if (!pairings.length) {
       setTStatus("No pairings generated.");
@@ -286,7 +300,7 @@ export default function TournamentPage() {
       if (cursor >= pairings.length) return;
       const pairing = pairings[cursor++];
       active += 1;
-      await runMatch(pairing.id, pairing.white, pairing.black, mode);
+      await runMatch(pairing.id, pairing.white, pairing.black, mode, key);
       active -= 1;
       if (cursor < pairings.length) {
         await runNext();
@@ -409,6 +423,20 @@ export default function TournamentPage() {
                   </div>
                 </div>
               ))}
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-sm text-slate-200">Your Vercel AI Gateway key (BYOK)</label>
+              <input
+                type="password"
+                value={apiKey}
+                onChange={(e) => setApiKey(e.target.value)}
+                placeholder="vck_..."
+                autoComplete="off"
+                disabled={busy}
+                className="w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none focus:border-arena-accent disabled:opacity-50"
+              />
+              <p className="text-xs text-slate-500">Stored locally and sent only with your tournament matches.</p>
             </div>
 
             <div className="flex items-center justify-between flex-wrap gap-3">

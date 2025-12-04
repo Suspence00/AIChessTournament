@@ -28,6 +28,7 @@ export default function Home() {
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState<MatchResult | null>(null);
   const [history, setHistory] = useLocalStorage<MatchResult[]>("arena-history", []);
+  const [apiKey, setApiKey] = useLocalStorage<string>("arena-api-key", "");
   const abortRef = useRef<AbortController | null>(null);
   const [eloChart, setEloChart] = useState<Array<{ model: string; rating: number }>>([]);
   const [lastEloDelta, setLastEloDelta] = useState<{ white: number; black: number }>({ white: 0, black: 0 });
@@ -290,6 +291,11 @@ export default function Home() {
   };
 
   const startMatch = async () => {
+    const key = apiKey.trim();
+    if (!key) {
+      setStatus("Add your Vercel AI Gateway API key to start a match.");
+      return;
+    }
     setRunning(true);
     setStatus("Launching bots via Vercel AI Gateway...");
     setMoves([]);
@@ -313,7 +319,13 @@ export default function Home() {
 
     const response = await fetch("/api/match", {
       method: "POST",
-      body: JSON.stringify({ whiteModel, blackModel, mode, clockMinutes: mode === "bullet" ? clockMinutes : undefined }),
+      body: JSON.stringify({
+        whiteModel,
+        blackModel,
+        mode,
+        clockMinutes: mode === "bullet" ? clockMinutes : undefined,
+        apiKey: key
+      }),
       headers: { "Content-Type": "application/json" },
       signal: controller.signal
     }).catch((err) => {
@@ -324,6 +336,15 @@ export default function Home() {
 
     if (!response || !response.body) {
       setStatus("No stream received from server.");
+      setRunning(false);
+      return;
+    }
+
+    if (!response.ok) {
+      const body = await response.text();
+      const msg = body || `Request failed (${response.status})`;
+      alert(`API key error or request failed:\n${msg}`);
+      setStatus("Match start failed — check your API key and try again.");
       setRunning(false);
       return;
     }
@@ -425,13 +446,25 @@ export default function Home() {
               <ModelPicker label="Model A (White)" value={whiteModel} onChange={setWhiteModel} options={modelOptions} />
               <ModelPicker label="Model B (Black)" value={blackModel} onChange={setBlackModel} options={modelOptions} />
             </div>
+            <div className="space-y-2">
+              <label className="text-sm text-slate-200">Your Vercel AI Gateway key (BYOK)</label>
+              <input
+                type="password"
+                value={apiKey}
+                onChange={(e) => setApiKey(e.target.value)}
+                placeholder="vck_..."
+                autoComplete="off"
+                className="w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none focus:border-arena-accent"
+              />
+              <p className="text-xs text-slate-500">Stored locally in your browser and sent only with your match requests.</p>
+            </div>
             <div className="flex flex-wrap items-center gap-3">
               <button
                 onClick={startMatch}
-                disabled={running}
+                disabled={running || !apiKey.trim()}
                 className="rounded-md bg-arena-accent px-4 py-2 font-semibold text-black hover:bg-cyan-300 disabled:opacity-50"
               >
-                {running ? "Match Running..." : "Start Match"}
+                {running ? "Match Running..." : !apiKey.trim() ? "Add API Key to Start" : "Start Match"}
               </button>
               <button
                 onClick={stopMatch}

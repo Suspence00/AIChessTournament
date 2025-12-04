@@ -10,6 +10,7 @@ export interface MatchRequest {
   blackModel: string;
   mode: MatchMode;
   clockMinutes?: number;
+  apiKey?: string;
 }
 
 export interface MatchMoveEvent {
@@ -85,6 +86,7 @@ export interface TournamentRequest {
   models: string[];
   mode: MatchMode;
   clockMinutes?: number;
+  apiKey?: string;
 }
 
 export interface TournamentMatch {
