@@ -7,7 +7,6 @@ export const modelOptions: ArenaModelOption[] = [
   // Anthropic
   { label: "Claude Sonnet 4.5", value: "anthropic/claude-sonnet-4.5", provider: "Anthropic", context: "200K", inputCostPerMTokens: 3.00, outputCostPerMTokens: 15.00, cacheReadCostPerMTokens: 0.30, cacheWriteCostPerMTokens: 3.75 },
   { label: "Claude Sonnet 4", value: "anthropic/claude-sonnet-4", provider: "Anthropic", context: "200K", inputCostPerMTokens: 3.00, outputCostPerMTokens: 15.00, cacheReadCostPerMTokens: 0.30, cacheWriteCostPerMTokens: 3.75 },
-  { label: "Claude 3.7 Sonnet", value: "anthropic/claude-3.7-sonnet", provider: "Anthropic", context: "200K", inputCostPerMTokens: 3.00, outputCostPerMTokens: 15.00, cacheReadCostPerMTokens: 0.30, cacheWriteCostPerMTokens: 3.75 },
   { label: "Claude Opus 4.5", value: "anthropic/claude-opus-4.5", provider: "Anthropic", context: "200K", inputCostPerMTokens: 5.00, outputCostPerMTokens: 25.00, cacheReadCostPerMTokens: 0.50, cacheWriteCostPerMTokens: 6.25 },
   { label: "Claude Haiku 4.5", value: "anthropic/claude-haiku-4.5", provider: "Anthropic", context: "200K", inputCostPerMTokens: 1.00, outputCostPerMTokens: 5.00, cacheReadCostPerMTokens: 0.10, cacheWriteCostPerMTokens: 1.25 },
 
