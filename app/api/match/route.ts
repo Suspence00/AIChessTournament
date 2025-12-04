@@ -65,7 +65,7 @@ async function fetchMove(
       prompt,
       temperature: 0.35,
       maxOutputTokens: 8, // keep responses short (UCI + optional promotion)
-      stopSequences: [" ", "\n"], // stop early if model tries to add commentary
+      stopSequences: ["\n"], // stop early if model tries to add commentary
       abortSignal: controller.signal
     });
 
