@@ -2,7 +2,13 @@ import { ArenaModelOption } from "./types";
 
 export const modelOptions: ArenaModelOption[] = [
   // xAI
-  { label: "Grok Code Fast", value: "xai/grok-code-fast-1", provider: "xAI", context: "256K", inputCostPerMTokens: 0.20, outputCostPerMTokens: 1.50, cacheReadCostPerMTokens: 0.02 },
+  { label: "Grok 4.1 Fast Reasoning", value: "xai/grok-4.1-fast-reasoning", provider: "xAI", context: "2M", inputCostPerMTokens: 0.20, outputCostPerMTokens: 0.50 },
+  { label: "Grok 4 Fast Reasoning", value: "xai/grok-4-fast-reasoning", provider: "xAI", context: "2M", inputCostPerMTokens: 0.20, outputCostPerMTokens: 0.50 },
+  { label: "Grok Code Fast", value: "xai/grok-code-fast-1", provider: "xAI", context: "256K", inputCostPerMTokens: 0.20, outputCostPerMTokens: 1.50 },
+  { label: "Grok 4", value: "xai/grok-4", provider: "xAI", context: "256K", inputCostPerMTokens: 3.00, outputCostPerMTokens: 15.00 },
+  { label: "Grok 3 Mini", value: "xai/grok-3-mini", provider: "xAI", context: "131K", inputCostPerMTokens: 0.30, outputCostPerMTokens: 0.50 },
+  { label: "Grok 3 Fast", value: "xai/grok-3-fast", provider: "xAI", context: "131K", inputCostPerMTokens: 5.00, outputCostPerMTokens: 25.00 },
+  { label: "Grok 3", value: "xai/grok-3", provider: "xAI", context: "131K", inputCostPerMTokens: 3.00, outputCostPerMTokens: 15.00 },
 
   // Anthropic
   { label: "Claude Sonnet 4.5", value: "anthropic/claude-sonnet-4.5", provider: "Anthropic", context: "200K", inputCostPerMTokens: 3.00, outputCostPerMTokens: 15.00, cacheReadCostPerMTokens: 0.30, cacheWriteCostPerMTokens: 3.75 },
@@ -23,7 +29,6 @@ export const modelOptions: ArenaModelOption[] = [
   { label: "GPT-5 Chat", value: "openai/gpt-5-chat", provider: "OpenAI", context: "128K", inputCostPerMTokens: 1.25, outputCostPerMTokens: 10.00, cacheReadCostPerMTokens: 0.13 },
   { label: "GPT-5.1 Instant", value: "openai/gpt-5.1-instant", provider: "OpenAI", context: "128K", inputCostPerMTokens: 1.25, outputCostPerMTokens: 10.00, cacheReadCostPerMTokens: 0.13 },
   { label: "GPT-5.1 Thinking", value: "openai/gpt-5.1-thinking", provider: "OpenAI", context: "400K", inputCostPerMTokens: 1.25, outputCostPerMTokens: 10.00, cacheReadCostPerMTokens: 0.13 },
-  { label: "GPT-4o Mini", value: "openai/gpt-4o-mini", provider: "OpenAI", context: "128K", inputCostPerMTokens: 0.15, outputCostPerMTokens: 0.60, cacheReadCostPerMTokens: 0.07 },
   { label: "GPT-4.1 Mini", value: "openai/gpt-4.1-mini", provider: "OpenAI", context: "1M", inputCostPerMTokens: 0.40, outputCostPerMTokens: 1.60, cacheReadCostPerMTokens: 0.10 },
 
   // Meituan

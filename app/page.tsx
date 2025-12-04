@@ -13,6 +13,7 @@ import { HistoryPanel } from "@/components/history-panel";
 import { StatusBar } from "@/components/status-bar";
 import { estimateCost, estimateTokens } from "@/lib/costs";
 import { EvalBar } from "@/components/eval-bar";
+import { Footer } from "@/components/footer";
 
 const Chessboard = dynamic(() => import("react-chessboard").then((mod) => mod.Chessboard), {
   ssr: false
@@ -755,6 +756,7 @@ export default function Home() {
           </div>
         </section>
       </div>
+      <Footer />
     </main>
   );
 }

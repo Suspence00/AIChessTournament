@@ -1,5 +1,7 @@
 ## AI Chess Arena
 
+🎮 **[Live Demo](https://ai-chess-tournament.vercel.app/)**
+
 Autonomous chess battles between two AI models routed through the Vercel AI Gateway. Pick any two models, start a match, watch moves stream live, and view winners plus a rolling history.
 
 ### Stack

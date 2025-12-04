@@ -6,6 +6,7 @@ import clsx from "clsx";
 import { getGroupedModels } from "@/lib/models";
 import { MatchMode, MatchMoveEvent, MatchResult } from "@/lib/types";
 import { useLocalStorage } from "@/lib/use-local-storage";
+import { Footer } from "@/components/footer";
 
 const Chessboard = dynamic(() => import("react-chessboard").then((mod) => mod.Chessboard), {
   ssr: false
@@ -139,11 +140,11 @@ export default function TournamentPage() {
       prev.map((m) =>
         m.id === cardId
           ? {
-              ...m,
-              controller,
-              running: true,
-              status: "Starting..."
-            }
+            ...m,
+            controller,
+            running: true,
+            status: "Starting..."
+          }
           : m
       )
     );
@@ -186,10 +187,10 @@ export default function TournamentPage() {
                 prev.map((m) =>
                   m.id === cardId
                     ? {
-                        ...m,
-                        status: formatStatus(evt.message) || "Status update",
-                        error: undefined
-                      }
+                      ...m,
+                      status: formatStatus(evt.message) || "Status update",
+                      error: undefined
+                    }
                     : m
                 )
               );
@@ -198,11 +199,11 @@ export default function TournamentPage() {
                 prev.map((m) =>
                   m.id === cardId
                     ? {
-                        ...m,
-                        fen: evt.fen,
-                        moves: [...m.moves, evt],
-                        status: formatStatus(evt.note) || `Move ${evt.move}`
-                      }
+                      ...m,
+                      fen: evt.fen,
+                      moves: [...m.moves, evt],
+                      status: formatStatus(evt.note) || `Move ${evt.move}`
+                    }
                     : m
                 )
               );
@@ -211,13 +212,13 @@ export default function TournamentPage() {
                 prev.map((m) =>
                   m.id === cardId
                     ? {
-                        ...m,
-                        result: evt.result,
-                        status: `Winner: ${evt.result.winner} (${evt.result.reason})`,
-                        running: false,
-                        controller: undefined,
-                        fen: evt.result.finalFen
-                      }
+                      ...m,
+                      result: evt.result,
+                      status: `Winner: ${evt.result.winner} (${evt.result.reason})`,
+                      running: false,
+                      controller: undefined,
+                      fen: evt.result.finalFen
+                    }
                     : m
                 )
               );
@@ -414,10 +415,22 @@ export default function TournamentPage() {
                           checked={selected.includes(m.value)}
                           onChange={() => toggleSelect(m.value)}
                         />
-                        <span className="text-sm text-white flex-1">
-                          {m.label}{" "}
-                          <span className="text-[11px] text-slate-400">Elo {Math.round(elo[m.value] ?? BASE_ELO)}</span>
-                        </span>
+                        <div className="flex-1 flex flex-col gap-0.5">
+                          <div className="flex items-center justify-between">
+                            <span className="text-sm text-white font-medium">{m.label}</span>
+                            <span className="text-[11px] text-slate-400">
+                              Elo {Math.round(elo[m.value] ?? BASE_ELO)}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-2 text-[10px]">
+                            <span className="text-slate-500">{m.context ?? "?"} context</span>
+                            {m.inputCostPerMTokens !== undefined && m.outputCostPerMTokens !== undefined && (
+                              <span className="text-slate-500 font-mono">
+                                ${m.inputCostPerMTokens.toFixed(2)} / ${m.outputCostPerMTokens.toFixed(2)} per M
+                              </span>
+                            )}
+                          </div>
+                        </div>
                       </label>
                     ))}
                   </div>
@@ -540,8 +553,8 @@ export default function TournamentPage() {
                       m.result?.winner === "white"
                         ? m.white
                         : m.result?.winner === "black"
-                        ? m.black
-                        : "Draw";
+                          ? m.black
+                          : "Draw";
                     const winnerLabel = m.result ? (m.result.winner === "draw" ? "Draw" : `${winnerName} wins`) : "";
 
                     return (
@@ -582,8 +595,8 @@ export default function TournamentPage() {
                               m.running
                                 ? "border-arena-accent text-arena-accent"
                                 : m.result
-                                ? "border-green-300 text-green-200"
-                                : "border-slate-500 text-slate-400"
+                                  ? "border-green-300 text-green-200"
+                                  : "border-slate-500 text-slate-400"
                             )}
                           >
                             {m.running ? "Live" : m.result ? "Done" : "Queued"}
@@ -699,15 +712,15 @@ export default function TournamentPage() {
                             m.result?.winner === "white"
                               ? m.white
                               : m.result?.winner === "black"
-                              ? m.black
-                              : "Draw";
+                                ? m.black
+                                : "Draw";
                           const statusLabel = m.result
                             ? m.result.winner === "draw"
                               ? "Draw"
                               : `${winnerName} wins`
                             : m.running
-                            ? "Live"
-                            : "Pending";
+                              ? "Live"
+                              : "Pending";
                           return (
                             <div
                               key={`bracket-match-${m.id}`}
@@ -729,8 +742,8 @@ export default function TournamentPage() {
                                       ? "bg-yellow-500/20 text-yellow-100"
                                       : "bg-green-500/20 text-green-100"
                                     : m.running
-                                    ? "bg-arena-accent/20 text-arena-accent"
-                                    : "bg-slate-700 text-slate-200"
+                                      ? "bg-arena-accent/20 text-arena-accent"
+                                      : "bg-slate-700 text-slate-200"
                                 )}
                               >
                                 {statusLabel}
@@ -770,6 +783,7 @@ export default function TournamentPage() {
           </div>
         </section>
       </div>
+      <Footer />
     </main>
   );
 }

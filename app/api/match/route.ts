@@ -3,7 +3,14 @@ import { streamText } from "ai";
 import { Chess } from "chess.js";
 import { buildModelPrompt } from "@/lib/prompt";
 import { applyChaosMove, parseUciMove } from "@/lib/chess-utils";
-import { MatchRequest, MatchMode, MatchResult, MatchStreamEvent, MatchClocks } from "@/lib/types";
+import {
+  MatchRequest,
+  MatchMode,
+  MatchResult,
+  MatchStreamEvent,
+  MatchClocks,
+  IllegalMoveSummary
+} from "@/lib/types";
 import { createGateway } from "@ai-sdk/gateway";
 
 export const maxDuration = 60;
@@ -79,7 +86,8 @@ function buildResult(
   moves: string[],
   illegalCounts: MatchResult["illegalCounts"],
   chess: Chess,
-  clocks?: MatchClocks
+  clocks?: MatchClocks,
+  lastIllegalMoves?: Partial<Record<"white" | "black", IllegalMoveSummary>>
 ): MatchResult {
   const pgn = chess.history().length > 0 ? chess.pgn({ newline: "\n" }) : moves.join(" ");
   return {
@@ -89,7 +97,8 @@ function buildResult(
     pgn,
     illegalCounts,
     clocks,
-    finalFen: chess.fen()
+    finalFen: chess.fen(),
+    lastIllegalMoves
   };
 }
 
@@ -98,9 +107,10 @@ function resultFromDraw(
   moves: string[],
   illegalCounts: MatchResult["illegalCounts"],
   chess: Chess,
-  clocks?: MatchClocks
+  clocks?: MatchClocks,
+  lastIllegalMoves?: Partial<Record<"white" | "black", IllegalMoveSummary>>
 ) {
-  return buildResult("draw", reason, moves, illegalCounts, chess, clocks);
+  return buildResult("draw", reason, moves, illegalCounts, chess, clocks, lastIllegalMoves);
 }
 
 export async function POST(req: NextRequest) {
@@ -139,6 +149,7 @@ export async function POST(req: NextRequest) {
         white: undefined,
         black: undefined
       };
+      const lastIllegalMoves: Partial<Record<"white" | "black", IllegalMoveSummary>> = {};
       const clocks = { white: initialClockMs, black: initialClockMs };
 
       send(controller, {
@@ -185,7 +196,8 @@ export async function POST(req: NextRequest) {
             moves,
             illegalCounts,
             chess,
-            isBullet ? { whiteMs: clocks.white, blackMs: clocks.black } : undefined
+            isBullet ? { whiteMs: clocks.white, blackMs: clocks.black } : undefined,
+            lastIllegalMoves
           );
           send(controller, { type: "status", message: `${activeColor} error: ${message}` });
           send(controller, { type: "end", result });
@@ -220,7 +232,8 @@ export async function POST(req: NextRequest) {
             moves,
             illegalCounts,
             chess,
-            isBullet ? { whiteMs: clocks.white, blackMs: clocks.black } : undefined
+            isBullet ? { whiteMs: clocks.white, blackMs: clocks.black } : undefined,
+            lastIllegalMoves
           );
           send(controller, {
             type: "move",
@@ -289,13 +302,21 @@ export async function POST(req: NextRequest) {
           );
 
           lastIllegal[activeColor] = { moveText: rawTrimmed, reason };
+          lastIllegalMoves[activeColor] = {
+            by: activeColor,
+            move: rawTrimmed || "(empty move)",
+            reason,
+            strikes: illegalCounts[activeColor],
+            ply
+          };
 
           // Status only for illegal (do not log as a move to keep list aligned)
           send(controller, {
             type: "status",
             message: `${activeColor} played illegal move ${cleaned || "empty"}: ${reason} (${illegalCounts[activeColor]} strikes)`,
             illegalCounts,
-            clocks: isBullet ? { whiteMs: clocks.white, blackMs: clocks.black } : undefined
+            clocks: isBullet ? { whiteMs: clocks.white, blackMs: clocks.black } : undefined,
+            illegalMove: lastIllegalMoves[activeColor]
           });
 
           if (mode === "chaos") {
@@ -330,7 +351,8 @@ export async function POST(req: NextRequest) {
               moves,
               illegalCounts,
               chess,
-              isBullet ? { whiteMs: clocks.white, blackMs: clocks.black } : undefined
+              isBullet ? { whiteMs: clocks.white, blackMs: clocks.black } : undefined,
+              lastIllegalMoves
             );
             send(controller, { type: "end", result });
             controller.close();
@@ -368,7 +390,8 @@ export async function POST(req: NextRequest) {
             moves,
             illegalCounts,
             chess,
-            isBullet ? { whiteMs: clocks.white, blackMs: clocks.black } : undefined
+            isBullet ? { whiteMs: clocks.white, blackMs: clocks.black } : undefined,
+            lastIllegalMoves
           );
           send(controller, { type: "end", result });
           controller.close();
@@ -381,7 +404,8 @@ export async function POST(req: NextRequest) {
             moves,
             illegalCounts,
             chess,
-            isBullet ? { whiteMs: clocks.white, blackMs: clocks.black } : undefined
+            isBullet ? { whiteMs: clocks.white, blackMs: clocks.black } : undefined,
+            lastIllegalMoves
           );
           send(controller, { type: "end", result });
           controller.close();
@@ -394,7 +418,8 @@ export async function POST(req: NextRequest) {
             moves,
             illegalCounts,
             chess,
-            isBullet ? { whiteMs: clocks.white, blackMs: clocks.black } : undefined
+            isBullet ? { whiteMs: clocks.white, blackMs: clocks.black } : undefined,
+            lastIllegalMoves
           );
           send(controller, { type: "end", result });
           controller.close();
@@ -407,7 +432,8 @@ export async function POST(req: NextRequest) {
             moves,
             illegalCounts,
             chess,
-            isBullet ? { whiteMs: clocks.white, blackMs: clocks.black } : undefined
+            isBullet ? { whiteMs: clocks.white, blackMs: clocks.black } : undefined,
+            lastIllegalMoves
           );
           send(controller, { type: "end", result });
           controller.close();
@@ -420,7 +446,8 @@ export async function POST(req: NextRequest) {
             moves,
             illegalCounts,
             chess,
-            isBullet ? { whiteMs: clocks.white, blackMs: clocks.black } : undefined
+            isBullet ? { whiteMs: clocks.white, blackMs: clocks.black } : undefined,
+            lastIllegalMoves
           );
           send(controller, { type: "end", result });
           controller.close();
@@ -433,7 +460,8 @@ export async function POST(req: NextRequest) {
         moves,
         illegalCounts,
         chess,
-        isBullet ? { whiteMs: clocks.white, blackMs: clocks.black } : undefined
+        isBullet ? { whiteMs: clocks.white, blackMs: clocks.black } : undefined,
+        lastIllegalMoves
       );
       send(controller, { type: "end", result });
       controller.close();

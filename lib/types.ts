@@ -38,6 +38,7 @@ export interface MatchStatusEvent {
     black: number;
   };
   clocks?: MatchClocks;
+  illegalMove?: IllegalMoveSummary;
 }
 
 export interface MatchEndEvent {
@@ -58,6 +59,14 @@ export type MatchReason =
   | "threefold"
   | "max-move";
 
+export interface IllegalMoveSummary {
+  by: "white" | "black";
+  move: string;
+  reason: string;
+  strikes: number;
+  ply?: number;
+}
+
 export interface MatchResult {
   winner: "white" | "black" | "draw";
   reason: MatchReason;
@@ -69,6 +78,7 @@ export interface MatchResult {
   };
   clocks?: MatchClocks;
   finalFen: string;
+  lastIllegalMoves?: Partial<Record<"white" | "black", IllegalMoveSummary>>;
 }
 
 export interface ArenaModelOption {
@@ -113,4 +123,17 @@ export interface TournamentResult {
   mode: MatchMode;
   matches: TournamentMatch[];
   standings: TournamentStanding[];
+}
+
+export interface MatchHistoryEntry {
+  id: string;
+  playedAt: number;
+  mode: MatchMode;
+  clockMinutes?: number;
+  white: { id: string; label: string };
+  black: { id: string; label: string };
+  result: MatchResult;
+  winnerLabel: string;
+  reasonLabel: string;
+  illegalNote?: string;
 }
