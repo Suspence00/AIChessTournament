@@ -1,4 +1,5 @@
 "use client";
+import Link from "next/link";
 
 import { useEffect, useMemo, useState } from "react";
 import dynamic from "next/dynamic";
@@ -372,12 +373,12 @@ export default function TournamentPage() {
                 Pick your engines by provider, spin up parallel matches, and watch every board live.
               </p>
             </div>
-            <a
+            <Link
               href="/"
               className="rounded-lg bg-white/10 px-4 py-2 text-sm font-semibold text-white border border-white/20 hover:border-arena-accent hover:bg-arena-accent/20 transition"
             >
               Single Game Mode
-            </a>
+            </Link>
           </div>
         </header>
 
