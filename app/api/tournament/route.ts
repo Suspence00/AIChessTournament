@@ -327,7 +327,7 @@ function buildStandings(
   matches: TournamentMatch[],
   ratings: Record<string, number>
 ): TournamentStanding[] {
-  const table: Record<string, TournamentStanding> = {};
+  const table: Record<string, TournamentStanding> = Object.create(null);
   for (const m of models) {
     table[m] = {
       model: m,
@@ -419,7 +419,7 @@ export async function POST(req: NextRequest) {
   }
 
   const matches: TournamentMatch[] = [];
-  const ratings: Record<string, number> = {};
+  const ratings: Record<string, number> = Object.create(null);
   for (const m of models) ratings[m] = BASE_RATING;
 
   for (let i = 0; i < models.length; i++) {

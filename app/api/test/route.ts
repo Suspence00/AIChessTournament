@@ -12,7 +12,6 @@ const gatewayKey =
 export async function GET(req: NextRequest) {
     console.log("=== AI Gateway Test ===");
     console.log("API Key present:", !!gatewayKey);
-    console.log("API Key prefix:", gatewayKey?.substring(0, 10) + "...");
 
     if (!gatewayKey) {
         return new Response(
@@ -55,12 +54,11 @@ export async function GET(req: NextRequest) {
             { headers: { "Content-Type": "application/json" } }
         );
     } catch (err: any) {
-        console.error("Test failed:", err);
+        console.error("AI Gateway test failed");
         return new Response(
             JSON.stringify({
-                error: err.message || String(err),
-                model: testModel,
-                stack: err.stack
+                error: "AI Gateway test failed",
+                model: testModel
             }),
             { status: 500, headers: { "Content-Type": "application/json" } }
         );
